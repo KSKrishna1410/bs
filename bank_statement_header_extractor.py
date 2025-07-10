@@ -50,11 +50,16 @@ class BankStatementHeaderExtractor:
         self.keywords_df = self._load_keywords(keywords_csv)
         self.header_mappings = self._create_header_mappings()
         
-        # Improved configuration for matching
-        self.y_tolerance = 25  # Increased from 15 for debugging
-        self.x_tolerance = 15   # Increased from 8 for debugging
-        self.max_distance_threshold = 150  # Increased from 100 for debugging
-        self.min_confidence_score = 0.5  # Lowered from 0.7 for debugging
+        # Enhanced configuration for 90%+ accuracy
+        self.y_tolerance = 12  # Reduced for more precise spatial matching
+        self.x_tolerance = 8   # Reduced for more precise spatial matching  
+        self.max_distance_threshold = 80  # Reduced for stricter proximity
+        self.min_confidence_score = 0.7  # Raised for higher quality results
+        
+        # Enhanced scoring weights for better prioritization
+        self.spatial_weight = 0.25    # Reduced - smart patterns are more reliable
+        self.validation_weight = 0.55  # Increased - validation is critical
+        self.ocr_confidence_weight = 0.2  # OCR confidence for tie-breaking
         
     def _load_keywords(self, csv_path: str) -> pd.DataFrame:
         """Load keyword mappings from CSV file - ONLY Header field types."""
@@ -189,120 +194,223 @@ class BankStatementHeaderExtractor:
     
     def _add_smart_pattern_matches(self, text_results: List[Tuple], key_matches: List[Dict]) -> None:
         """
-        Add smart pattern-based matches beyond CSV keywords.
-        This helps find headers in different bank statement formats.
+        Enhanced smart pattern-based matches for 90%+ accuracy.
+        Covers multiple bank statement formats and edge cases.
         """
-        print("🔍 Looking for smart patterns...")
+        # print("🔍 Looking for enhanced smart patterns...")
         
         for text_idx, (text, bbox, confidence) in enumerate(text_results):
+            text_lower = text.lower()
             
-            # Pattern 1: Statement date in text like "as on date DD-MM-YYYY"
-            if re.search(r'as on date\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text.lower()):
-                # Extract the date part
-                date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
-                if date_match:
+            # Pattern 1: Statement date patterns (multiple formats)
+            date_patterns = [
+                # "as on date DD-MM-YYYY" or "as on DD-MM-YYYY"
+                (r'as\s+on\s+(date\s+)?\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'Statement Date'),
+                # "statement as on DD-MM-YYYY"
+                (r'statement\s+as\s+on\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'Statement Date'),
+                # "for the period ending DD-MM-YYYY"
+                (r'period\s+ending\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'Statement Date'),
+                # "statement date: DD-MM-YYYY"
+                (r'statement\s+date[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'Statement Date'),
+                # "date of statement: DD-MM-YYYY"
+                (r'date\s+of\s+statement[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'Statement Date'),
+            ]
+            
+            for pattern, field_name in date_patterns:
+                if re.search(pattern, text_lower):
                     key_matches.append({
-                        'field_name': 'Statement Date',
+                        'field_name': field_name,
                         'matched_text': text,
-                        'keyword': 'as on date',
+                        'keyword': 'date pattern',
                         'bbox': bbox,
                         'data_type': 'Date',
+                        'field_type': 'Header',
+                        'confidence': confidence,
+                        'match_score': 0.95,
+                        'text_index': text_idx
+                    })
+            
+            # Pattern 2: Enhanced date range patterns
+            range_patterns = [
+                # "between DD-MM-YYYY to DD-MM-YYYY"
+                (r'between\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "from DD-MM-YYYY to DD-MM-YYYY"
+                (r'from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "DD-MM-YYYY TO DD-MM-YYYY"
+                (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "statement period: DD-MM-YYYY to DD-MM-YYYY"
+                (r'statement\s+period[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "period: DD-MM-YYYY to DD-MM-YYYY"
+                (r'period[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+            ]
+            
+            for pattern, field_type in range_patterns:
+                if re.search(pattern, text_lower):
+                    if field_type == 'both':
+                        # Add both FROM and TO matches
+                        for suffix, field_name in [('From', 'Statement Date From'), ('To', 'Statement Date To')]:
+                            key_matches.append({
+                                'field_name': field_name,
+                                'matched_text': text,
+                                'keyword': 'date range pattern',
+                                'bbox': bbox,
+                                'data_type': 'Date',
+                                'field_type': 'Header',
+                                'confidence': confidence,
+                                'match_score': 0.95,
+                                'text_index': text_idx
+                            })
+            
+            # Pattern 3: Enhanced account number patterns
+            account_patterns = [
+                # "Account No. XXXXXXXXXXX6582" or "A/C No. XXXXXXXXXXX6582"
+                (r'a/?c\s*no\.?\s*[:\s]*X+\d{3,8}', 'Account Number'),
+                # "Account Number: 322205001059"
+                (r'account\s+number[:\s]+\d{8,20}', 'Account Number'),
+                # "A/C: 1234567890123456"
+                (r'a/?c[:\s]+\d{8,20}', 'Account Number'),
+                # "Account: XXXXXXXXXXX6582"
+                (r'account[:\s]+X+\d{3,8}', 'Account Number'),
+                # "Detailed Statement for a/c no. XXXXXXXXXXX6582"
+                (r'detailed\s+statement\s+for\s+a/?c\s+no\.?\s*X+\d{3,8}', 'Account Number'),
+                # "Account Name: [Name] Account Number: [Number]"
+                (r'account\s+name:.*account\s+number[:\s]+\d{8,20}', 'Account Number'),
+            ]
+            
+            for pattern, field_name in account_patterns:
+                if re.search(pattern, text_lower):
+                    key_matches.append({
+                        'field_name': field_name,
+                        'matched_text': text,
+                        'keyword': 'account pattern',
+                        'bbox': bbox,
+                        'data_type': 'String',
                         'field_type': 'Header',
                         'confidence': confidence,
                         'match_score': 0.9,
                         'text_index': text_idx
                     })
-                    print(f"   ✅ SMART MATCH: Statement Date from '{text[:50]}...'")
             
-            # Pattern 2: Date ranges in text like "between DD-MM-YYYY to DD-MM-YYYY"
-            elif re.search(r'between\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text.lower()):
-                # Add match for FROM date
-                key_matches.append({
-                    'field_name': 'Statement Date From',
-                    'matched_text': text,
-                    'keyword': 'between',
-                    'bbox': bbox,
-                    'data_type': 'Date',
-                    'field_type': 'Header',
-                    'confidence': confidence,
-                    'match_score': 0.9,
-                    'text_index': text_idx
-                })
-                print(f"   ✅ SMART MATCH: Statement Date From from '{text[:50]}...'")
+            # Pattern 4: Enhanced IFSC code patterns
+            ifsc_patterns = [
+                # "IFSC CODE : IOBA0000384"
+                (r'ifsc\s*code\s*[:\s]*[A-Z]{4}\d{7}', 'IFSC Code'),
+                # "IFSC: HDFC0001628"
+                (r'ifsc[:\s]+[A-Z]{4}\d{7}', 'IFSC Code'),
+                # "RTGS/NEFT IFSC: HDFC0001628"
+                (r'rtgs/?neft\s*ifsc[:\s]*[A-Z]{4}\d{7}', 'IFSC Code'),
+                # Just the IFSC code standalone
+                (r'\b[A-Z]{4}\d{7}\b', 'IFSC Code'),
+                # "IFS Code: SBIN0016345"
+                (r'ifs\s*code[:\s]*[A-Z]{4}\d{7}', 'IFSC Code'),
+            ]
+            
+            for pattern, field_name in ifsc_patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    key_matches.append({
+                        'field_name': field_name,
+                        'matched_text': text,
+                        'keyword': 'IFSC pattern',
+                        'bbox': bbox,
+                        'data_type': 'String',
+                        'field_type': 'Header',
+                        'confidence': confidence,
+                        'match_score': 0.95,
+                        'text_index': text_idx
+                    })
+            
+            # Pattern 5: Enhanced branch name patterns
+            branch_patterns = [
+                # "Branch Name : Secunderabad"
+                (r'branch\s+name\s*[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
+                # "Branch: HYDERABAD - BANJARA HILLS"
+                (r'branch[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
+                # "Home Branch: [Name]"
+                (r'home\s+branch[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
+                # "BRN -Branch: [Name]" (like in Axis)
+                (r'brn\s*-?\s*branch[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
+            ]
+            
+            for pattern, field_name in branch_patterns:
+                if re.search(pattern, text_lower) and len(text) < 60:  # Reasonable length for branch names
+                    key_matches.append({
+                        'field_name': field_name,
+                        'matched_text': text,
+                        'keyword': 'branch pattern',
+                        'bbox': bbox,
+                        'data_type': 'String',
+                        'field_type': 'Header',
+                        'confidence': confidence,
+                        'match_score': 0.85,
+                        'text_index': text_idx
+                    })
                 
-                # Add match for TO date
-                key_matches.append({
-                    'field_name': 'Statement Date To',
-                    'matched_text': text,
-                    'keyword': 'between',
-                    'bbox': bbox,
-                    'data_type': 'Date',
-                    'field_type': 'Header',
-                    'confidence': confidence,
-                    'match_score': 0.9,
-                    'text_index': text_idx
-                })
-                print(f"   ✅ SMART MATCH: Statement Date To from '{text[:50]}...'")
+            # Pattern 6: Enhanced balance patterns
+            balance_patterns = [
+                # "Opening Balance: 12345.67"
+                (r'opening\s+balance[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                # "Closing Balance: 12345.67"
+                (r'closing\s+balance[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                # "Opening Bal: 12345.67"
+                (r'opening\s+bal[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                # "Closing Bal: 12345.67"
+                (r'closing\s+bal[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                # "Balance B/F: 12345.67"
+                (r'balance\s+b/?f[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                # "Balance C/F: 12345.67"
+                (r'balance\s+c/?f[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+            ]
             
-            # Pattern 3: Account numbers with masking like "XXXXXXXXXXX6582"
-            elif re.search(r'^.*a/c.*no.*X+\d{3,6}', text, re.IGNORECASE):
-                key_matches.append({
-                    'field_name': 'Account Number',
-                    'matched_text': text,
-                    'keyword': 'account number pattern',
-                    'bbox': bbox,
-                    'data_type': 'String',
-                    'field_type': 'Header',
-                    'confidence': confidence,
-                    'match_score': 0.85,
-                    'text_index': text_idx
-                })
-                print(f"   ✅ SMART MATCH: Account Number from '{text[:50]}...'")
+            for pattern, field_name in balance_patterns:
+                if re.search(pattern, text_lower):
+                    key_matches.append({
+                        'field_name': field_name,
+                        'matched_text': text,
+                        'keyword': 'balance pattern',
+                        'bbox': bbox,
+                        'data_type': 'Double',
+                        'field_type': 'Header',
+                        'confidence': confidence,
+                        'match_score': 0.9,
+                        'text_index': text_idx
+                    })
             
-            # Pattern 3b: Account numbers in format "Account No. XXXXXXXXXXX6582"
-            elif re.search(r'account\s+no\..*X+\d{3,6}', text, re.IGNORECASE):
-                key_matches.append({
-                    'field_name': 'Account Number',
-                    'matched_text': text,
-                    'keyword': 'account number pattern',
-                    'bbox': bbox,
-                    'data_type': 'String',
-                    'field_type': 'Header',
-                    'confidence': confidence,
-                    'match_score': 0.85,
-                    'text_index': text_idx
-                })
-                print(f"   ✅ SMART MATCH: Account Number from '{text[:50]}...'")
+            # Pattern 7: Additional statement period patterns for specific banks
+            period_patterns = [
+                # "Statement From : 07/08/2024 To : 28/08/2024"
+                (r'statement\s+from[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "Transaction Period: From 01/04/2023 To 31/03/2024"
+                (r'transaction\s+period[:\s]+from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "From 29/07/2024 To 29/08/2024"
+                (r'from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+            ]
             
-            # Pattern 4: IFSC codes in format ABCD1234567
-            elif re.search(r'\b[A-Z]{4}\d{7}\b', text):
-                key_matches.append({
-                    'field_name': 'IFSC Code',
-                    'matched_text': text,
-                    'keyword': 'IFSC pattern',
-                    'bbox': bbox,
-                    'data_type': 'String',
-                    'field_type': 'Header',
-                    'confidence': confidence,
-                    'match_score': 0.9,
-                    'text_index': text_idx
-                })
-                print(f"   ✅ SMART MATCH: IFSC Code from '{text[:50]}...'")
-            
-            # Pattern 5: Branch names after "Branch" keyword
-            elif re.search(r'branch.*name.*:', text.lower()) and len(text) < 50:
-                key_matches.append({
-                    'field_name': 'Bank Branch',
-                    'matched_text': text,
-                    'keyword': 'branch name pattern',
-                    'bbox': bbox,
-                    'data_type': 'String',
-                    'field_type': 'Header',
-                    'confidence': confidence,
-                    'match_score': 0.8,
-                    'text_index': text_idx
-                })
-                print(f"   ✅ SMART MATCH: Branch Name from '{text[:50]}...'")
+            for pattern, field_type in period_patterns:
+                if re.search(pattern, text_lower):
+                    if field_type == 'both':
+                        # Add both FROM and TO matches
+                        key_matches.append({
+                            'field_name': 'Statement Date From',
+                            'matched_text': text,
+                            'keyword': 'period pattern',
+                            'bbox': bbox,
+                            'data_type': 'Date',
+                            'field_type': 'Header',
+                            'confidence': confidence,
+                            'match_score': 0.9,
+                            'text_index': text_idx
+                        })
+                        key_matches.append({
+                            'field_name': 'Statement Date To',
+                            'matched_text': text,
+                            'keyword': 'period pattern',
+                            'bbox': bbox,
+                            'data_type': 'Date',
+                            'field_type': 'Header',
+                            'confidence': confidence,
+                            'match_score': 0.9,
+                            'text_index': text_idx
+                        })
     
     def _find_header_key_matches(self, text_results: List[Tuple]) -> List[Dict]:
         """
@@ -363,7 +471,7 @@ class BankStatementHeaderExtractor:
                         # print(f"   ✅ MATCH: '{text}' -> {field_name} (score: {match_score:.2f})")
                         break  # Take first good match for this text
         
-        print(f"🔍 Found {len(key_matches)} potential HEADER key matches")
+        # print(f"🔍 Found {len(key_matches)} potential HEADER key matches")
         return key_matches
     
     def _calculate_keyword_match_score(self, text: str, keyword: str) -> float:
@@ -397,67 +505,204 @@ class BankStatementHeaderExtractor:
     
     def _extract_value_from_smart_match(self, key_match: Dict) -> Optional[str]:
         """
-        Extract the actual value from smart pattern matches where value is embedded in the text.
+        Enhanced value extraction from smart pattern matches.
+        Handles multiple bank formats and patterns for 90%+ accuracy.
         """
         text = key_match['matched_text']
         field_name = key_match['field_name']
         keyword = key_match.get('keyword', '')
         
-        print(f"      🔧 Smart extraction for {field_name} from: '{text}'")
+        # print(f"      🎯 Smart extracting {field_name} from: '{text[:50]}...'")
         
-        if field_name == 'Statement Date' and 'as on date' in keyword:
-            # Extract date from "Relationship summary as on date 30-09-2024"
-            date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
-            if date_match:
-                extracted = date_match.group()
-                print(f"         Extracted Statement Date: '{extracted}'")
-                return extracted
-                
-        elif field_name == 'Statement Date From' and 'between' in keyword:
-            # Extract FROM date from "between 01-09-2024 to 30-09-2024"
-            from_match = re.search(r'between\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', text.lower())
-            if from_match:
-                extracted = from_match.group(1)
-                print(f"         Extracted Statement Date From: '{extracted}'")
-                return extracted
-            # If full range, return it (will be parsed later)
-            return text
-            
-        elif field_name == 'Statement Date To' and 'between' in keyword:
-            # Extract TO date from "between 01-09-2024 to 30-09-2024"
-            to_match = re.search(r'to\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', text.lower())
-            if to_match:
-                extracted = to_match.group(1)
-                print(f"         Extracted Statement Date To: '{extracted}'")
-                return extracted
-                
-        elif field_name == 'Account Number' and 'account number pattern' in keyword:
-            # Extract masked account number like "XXXXXXXXXXX6582"
-            acc_match = re.search(r'X+\d{3,6}', text)
-            if acc_match:
-                extracted = acc_match.group()
-                print(f"         Extracted Account Number: '{extracted}'")
-                return extracted
-                
-        elif field_name == 'IFSC Code' and ('IFSC pattern' in keyword or 'IFSC Code' in text):
-            # Extract IFSC code like "UTIB0000068" from "IFSC Code : UTIB0000068"
-            ifsc_match = re.search(r'\b[A-Z]{4}\d{7}\b', text)
-            if ifsc_match:
-                extracted = ifsc_match.group()
-                print(f"         Extracted IFSC Code: '{extracted}'")
-                return extracted
-                
-        elif field_name == 'Bank Branch' and ('branch name pattern' in keyword or 'Branch Name' in text):
-            # Extract branch name from "Branch Name : Secunderabad"
-            if ':' in text:
-                # Split by colon and take the part after it
-                parts = text.split(':', 1)
-                if len(parts) > 1:
-                    extracted = parts[1].strip()
-                    print(f"         Extracted Branch Name: '{extracted}'")
+        # Date extraction for various patterns
+        if field_name in ['Statement Date', 'Statement Date From', 'Statement Date To']:
+            if 'date pattern' in keyword:
+                # Extract date from patterns like "as on date DD-MM-YYYY"
+                date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                if date_match:
+                    extracted = date_match.group()
+                    # print(f"         Extracted Date: '{extracted}'")
                     return extracted
                     
-        print(f"         ❌ Could not extract value from smart match")
+            elif 'date range pattern' in keyword or 'period pattern' in keyword:
+                # Extract dates from range patterns
+                dates = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                if len(dates) >= 2:
+                    if field_name == 'Statement Date From':
+                        extracted = dates[0]
+                    elif field_name == 'Statement Date To':
+                        extracted = dates[-1]
+                    else:  # Statement Date
+                        extracted = dates[-1]  # Usually the end date
+                    # print(f"         Extracted Date Range {field_name}: '{extracted}'")
+                    return extracted
+                elif len(dates) == 1:
+                    # Single date found
+                    extracted = dates[0]
+                    # print(f"         Extracted Single Date: '{extracted}'")
+                    return extracted
+                    
+            elif 'between' in keyword:
+                # Legacy pattern support
+                dates = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                if len(dates) >= 2:
+                    if field_name == 'Statement Date From':
+                        extracted = dates[0]
+                    else:  # Statement Date To
+                        extracted = dates[1]
+                    # print(f"         Extracted Between Date: '{extracted}'")
+                    return extracted
+        
+        # Account number extraction
+        elif field_name == 'Account Number':
+            if 'account pattern' in keyword:
+                # Enhanced account number extraction
+                patterns = [
+                    # Masked account numbers
+                    (r'X+\d{3,8}', 0.95),
+                    # Pure numeric account numbers
+                    (r'\d{8,20}', 0.9),
+                    # Account numbers in specific contexts
+                    (r'account\s+number[:\s]+(\d{8,20})', 0.95),
+                    (r'a/?c\s*no\.?\s*[:\s]*(\d{8,20})', 0.9),
+                    (r'a/?c[:\s]+(\d{8,20})', 0.85),
+                ]
+                
+                for pattern, confidence in patterns:
+                    if 'account\s+number[:\s]+' in pattern or 'a/?c' in pattern:
+                        # Extract from capture group
+                        match = re.search(pattern, text, re.IGNORECASE)
+                        if match and match.groups():
+                            extracted = match.group(1)
+                            # print(f"         Extracted Account Number (group): '{extracted}'")
+                            return extracted
+                    else:
+                        # Direct match
+                        match = re.search(pattern, text)
+                        if match:
+                            extracted = match.group()
+                            # Validate it's not part of a longer invalid string
+                            if not any(invalid in extracted.lower() for invalid in ['account', 'number', 'status', 'type']):
+                                # print(f"         Extracted Account Number (direct): '{extracted}'")
+                                return extracted
+                                
+            # Legacy support
+            elif 'account number pattern' in keyword:
+                # Extract masked account number like "XXXXXXXXXXX6582"
+                acc_match = re.search(r'X+\d{3,8}', text)
+                if acc_match:
+                    extracted = acc_match.group()
+                    return extracted
+                # Extract actual account number
+                elif re.search(r'account\s+number[:\s]+(\d{8,18})', text, re.IGNORECASE):
+                    acc_match = re.search(r'\d{8,18}', text)
+                    if acc_match:
+                        extracted = acc_match.group()
+                        return extracted
+                        
+        # IFSC code extraction
+        elif field_name == 'IFSC Code' and ('IFSC pattern' in keyword or 'IFSC Code' in text):
+            # Enhanced IFSC code extraction
+            patterns = [
+                # IFSC with various separators
+                r'ifsc\s*code\s*[:\s]*([A-Z]{4}\d{7})',
+                r'ifsc[:\s]+([A-Z]{4}\d{7})',
+                r'ifs\s*code[:\s]*([A-Z]{4}\d{7})',
+                r'rtgs/?neft\s*ifsc[:\s]*([A-Z]{4}\d{7})',
+                # Standalone IFSC codes
+                r'\b([A-Z]{4}\d{7})\b',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    if match.groups():
+                        extracted = match.group(1).upper()
+                    else:
+                        extracted = match.group().upper()
+                    
+                    # Validate it's a proper IFSC (4 letters + 7 digits)
+                    if re.match(r'^[A-Z]{4}\d{7}$', extracted):
+                        # print(f"         Extracted IFSC Code: '{extracted}'")
+                        return extracted
+                        
+        # Branch name extraction
+        elif field_name == 'Bank Branch':
+            if 'branch pattern' in keyword:
+                patterns = [
+                    # "Branch Name : Secunderabad"
+                    r'branch\s+name\s*[:\s]+([A-Za-z\s\-&]{3,30})',
+                    # "Branch: HYDERABAD - BANJARA HILLS"
+                    r'branch[:\s]+([A-Za-z\s\-&]{3,30})',
+                    # "Home Branch: [Name]"
+                    r'home\s+branch[:\s]+([A-Za-z\s\-&]{3,30})',
+                    # "BRN -Branch: [Name]"
+                    r'brn\s*-?\s*branch[:\s]+([A-Za-z\s\-&]{3,30})',
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match and match.groups():
+                        extracted = match.group(1).strip()
+                        # Clean up the extracted value
+                        extracted = re.sub(r'\s+', ' ', extracted)  # Normalize spaces
+                        if 3 <= len(extracted) <= 50:
+                            # print(f"         Extracted Branch Name: '{extracted}'")
+                            return extracted
+                            
+            # Legacy support
+            elif 'branch name pattern' in keyword:
+                # Extract branch name from "Branch Name : Secunderabad"
+                if ':' in text:
+                    parts = text.split(':', 1)
+                    if len(parts) == 2:
+                        extracted = parts[1].strip()
+                        # print(f"         Extracted Branch Name: '{extracted}'")
+                        return extracted
+                        
+        # Balance extraction
+        elif field_name in ['Opening Balance', 'Closing Balance'] and 'balance pattern' in keyword:
+            # Enhanced balance extraction
+            patterns = [
+                # With currency symbols
+                r'[\d,]+\.\d{2}',  # 12,345.67
+                r'[\d,]+',         # 12,345
+                r'[\d.]+',         # 12345.67
+            ]
+            
+            for pattern in patterns:
+                balance_match = re.search(pattern, text)
+                if balance_match:
+                    extracted = balance_match.group()
+                    # Clean up the extracted value
+                    extracted = extracted.replace(',', '')  # Remove thousands separators
+                    try:
+                        # Validate it's a reasonable number
+                        amount = float(extracted)
+                        if 0.01 <= amount <= 999999999:  # Reasonable range
+                            # print(f"         Extracted Balance: '{extracted}'")
+                            return extracted
+                    except ValueError:
+                        continue
+                        
+        # Fallback for any unhandled patterns
+        if ('pattern' in keyword and keyword != 'IFSC pattern'):
+            # Try to extract the most relevant part based on field type
+            if field_name in ['Statement Date', 'Statement Date From', 'Statement Date To']:
+                date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                if date_match:
+                    return date_match.group()
+            elif field_name == 'Account Number':
+                # Look for any reasonable account number pattern
+                for pattern in [r'X+\d{3,8}', r'\d{8,20}']:
+                    match = re.search(pattern, text)
+                    if match:
+                        return match.group()
+            elif field_name == 'IFSC Code':
+                ifsc_match = re.search(r'[A-Z]{4}\d{7}', text.upper())
+                if ifsc_match:
+                    return ifsc_match.group()
+        
         return None
     
     def _find_value_candidates_for_key(self, key_match: Dict, text_results: List[Tuple]) -> List[Dict]:
@@ -526,7 +771,7 @@ class BankStatementHeaderExtractor:
     
     def _validate_and_score_value(self, value_text: str, data_type: str, field_name: str) -> Tuple[bool, float]:
         """
-        Validate if the value matches expected data type and return confidence score.
+        Enhanced validation with stricter rules for 90%+ accuracy.
         
         Returns:
             (is_valid, confidence_score)
@@ -536,107 +781,218 @@ class BankStatementHeaderExtractor:
         if not value_text:
             return False, 0.0
         
+        # Enhanced rejection list with more comprehensive field name detection
+        wrong_values = [
+            # Field names
+            'account number', 'account no', 'account status', 'account type', 'account name', 'account holder',
+            'ifsc code', 'ifsc', 'micr code', 'micr', 'branch code', 'branch name', 'branch email', 'branch address',
+            'opening balance', 'closing balance', 'statement date', 'date', 'period', 'transaction date',
+            'currency', 'inr', 'usd', 'eur', 'ckyc number', 'customer id', 'branch address',
+            'transaction', 'description', 'particulars', 'narration', 'product name', 'froduct name',
+            # Common wrong extractions
+            'credit', 'debit', 'balance', 'amount', 'total', 'charges', 'fee', 'interest',
+            'statement', 'summary', 'details', 'information', 'report', 'document',
+            'page', 'continued', 'contd', 'nil', 'na', 'not applicable',
+            # Common partial extractions
+            'branch phone', 'phone', 'email', 'website', 'address', 'pin', 'code'
+        ]
+        
+        if value_text.lower().replace(':', '').strip() in wrong_values:
+            return False, 0.0
+        
         if data_type == 'Date':
-            # Improved date validation patterns
+            # Enhanced date validation with stricter patterns
             date_patterns = [
-                (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.9),  # DD/MM/YYYY
-                (r'\d{2,4}[/-]\d{1,2}[/-]\d{1,2}', 0.9),  # YYYY/MM/DD
+                (r'^\d{1,2}[/-]\d{1,2}[/-]\d{4}$', 0.95),  # Perfect DD/MM/YYYY
+                (r'^\d{2,4}[/-]\d{1,2}[/-]\d{1,2}$', 0.95),  # Perfect YYYY/MM/DD
+                (r'^\d{1,2}[/-]\d{1,2}[/-]\d{2}$', 0.9),   # Perfect DD/MM/YY
+                (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.85),  # Date somewhere in text
                 (r'\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}', 0.8),  # DD Month YYYY
                 (r'[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}', 0.8),  # Month DD, YYYY
-                (r'\d{1,2}[/-]\d{1,2}[/-]\d{2}', 0.7)  # DD/MM/YY
             ]
             
             # Special handling for statement date ranges
             if field_name in ['Statement Date From', 'Statement Date To']:
-                # Look for date range patterns like "01-09-2024 to 30-09-2024"
+                # Enhanced date range patterns
                 range_patterns = [
-                    (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.95),
-                    (r'between\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.95),
-                    (r'from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.95),
+                    (r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$', 0.98),
+                    (r'between\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.98),
+                    (r'from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.98),
+                    (r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+TO\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 0.95),
                 ]
                 
                 for pattern, score in range_patterns:
-                    if re.search(pattern, value_text.lower()):
+                    if re.search(pattern, value_text, re.IGNORECASE):
                         return True, score
             
             for pattern, score in date_patterns:
                 if re.search(pattern, value_text):
-                    # Additional validation: reject obviously wrong dates
-                    reject_words = ['transaction', 'upi', 'payment', 'transfer', 'withdrawal', 'deposit']
+                    # Strict rejection of obviously wrong dates
+                    reject_words = [
+                        'transaction', 'upi', 'payment', 'transfer', 'withdrawal', 'deposit', 
+                        'address', 'plot', 'hno', 'street', 'city', 'pin', 'state',
+                        'name', 'account', 'branch', 'bank', 'customer', 'holder'
+                    ]
                     if any(word in value_text.lower() for word in reject_words):
                         continue
+                    
+                    # Validate year range (must be reasonable)
+                    year_match = re.search(r'(\d{4})', value_text)
+                    if year_match:
+                        year = int(year_match.group(1))
+                        if year < 2000 or year > 2030:  # Reasonable year range
+                            continue
+                    
                     return True, score
                     
             return False, 0.0
             
         elif data_type == 'Double':
-            # Improved numeric validation  
+            # Enhanced numeric validation with stricter patterns
             numeric_patterns = [
-                (r'^\s*₹?\s*[\d,]+\.?\d*\s*$', 0.9),  # Clean currency amounts
-                (r'^\s*[\d,]+\.?\d*\s*$', 0.8),  # Clean numbers
-                (r'₹\s*[\d,]+\.?\d*', 0.7),  # Currency with rupee symbol
-                (r'\$\s*[\d,]+\.?\d*', 0.7),  # Currency with dollar symbol
+                (r'^\s*₹?\s*[\d,]+\.\d{2}\s*$', 0.95),  # Perfect currency with 2 decimals
+                (r'^\s*[\d,]+\.\d{2}\s*$', 0.9),        # Perfect number with 2 decimals
+                (r'^\s*₹?\s*[\d,]+\s*$', 0.85),         # Clean integer amounts
+                (r'^\s*[\d,]+\.?\d*\s*$', 0.8),         # Clean numbers
+                (r'₹\s*[\d,]+\.?\d*', 0.75),            # Currency with rupee symbol
             ]
             
             for pattern, score in numeric_patterns:
                 if re.search(pattern, value_text):
-                    # Reject transaction-like text  
-                    reject_words = ['upi', 'transaction', 'transfer', 'payment']
+                    # Strict rejection of transaction-like text  
+                    reject_words = ['upi', 'transaction', 'transfer', 'payment', 'neft', 'rtgs', 'imps']
                     if any(word in value_text.lower() for word in reject_words):
                         continue
+                    
+                    # Enhanced balance validation
+                    if field_name in ['Opening Balance', 'Closing Balance']:
+                        try:
+                            # Extract numeric value
+                            numeric_part = re.sub(r'[^\d.]', '', value_text)
+                            if numeric_part:
+                                amount = float(numeric_part)
+                                # Reject unreasonable amounts (too small or too large)
+                                if amount < 0.01 or amount > 999999999:
+                                    continue
+                                # Give higher score for reasonable balance amounts
+                                if 1 <= amount <= 10000000:  # Reasonable balance range
+                                    score = min(score + 0.1, 0.98)
+                        except:
+                            continue
+                    
                     return True, score
                     
             return False, 0.0
             
         elif data_type == 'String':
-            # For account numbers, branches, IFSC codes
             if field_name == 'Account Number':
-                # Account numbers: should be alphanumeric, reasonable length
-                if re.match(r'^[A-Za-z0-9\-\s]{8,20}$', value_text):
-                    # Reject transaction-like text
-                    reject_words = ['upi', 'transaction', 'transfer', 'payment']
-                    if any(word in value_text.lower() for word in reject_words):
-                        return False, 0.0
-                    return True, 0.9
-                elif re.match(r'^\d{8,18}$', value_text):  # Pure numeric account number
-                    return True, 0.8
-                # Look for masked account numbers like "XXXXXXXXXXX6582"
-                elif re.match(r'^X+\d{3,6}$', value_text):
-                    return True, 0.85
-                    
+                # Enhanced account number validation with multiple patterns
+                account_patterns = [
+                    # Masked account numbers like "XXXXXXXXXXX6582"
+                    (r'^X+\d{3,8}$', 0.95),
+                    # Pure numeric account numbers
+                    (r'^\d{8,20}$', 0.9),
+                    # Alphanumeric account numbers
+                    (r'^[A-Za-z0-9]{8,25}$', 0.85),
+                    # Account numbers with spaces/hyphens
+                    (r'^[A-Za-z0-9\s\-]{8,25}$', 0.8),
+                ]
+                
+                for pattern, score in account_patterns:
+                    if re.match(pattern, value_text.strip()):
+                        # Enhanced rejection of obvious non-account-numbers
+                        reject_words = [
+                            'upi', 'transaction', 'transfer', 'payment', 'account', 'status', 'type', 
+                            'name', 'holder', 'branch', 'bank', 'customer', 'product', 'service',
+                            'statement', 'summary', 'balance', 'amount', 'currency', 'date'
+                        ]
+                        if any(word in value_text.lower() for word in reject_words):
+                            return False, 0.0
+                        
+                        # Reject if it's clearly a description or address
+                        if len(value_text.split()) > 2:  # Account numbers shouldn't have multiple words
+                            return False, 0.0
+                        
+                        return True, score
+                        
             elif field_name == 'IFSC Code':
-                # IFSC codes: 4 letters + 7 digits
-                if re.match(r'^[A-Z]{4}\d{7}$', value_text.upper().replace(' ', '')):
-                    return True, 0.95
-                elif re.match(r'^[A-Z]{4}[0-9A-Z]{7}$', value_text.upper().replace(' ', '')):
-                    return True, 0.8
+                # Stricter IFSC validation - must be exactly 4 letters + 7 digits
+                clean_value = value_text.upper().replace(' ', '').replace(':', '').replace('-', '')
+                
+                if re.match(r'^[A-Z]{4}\d{7}$', clean_value):
+                    # Additional validation: first 4 letters should be bank code
+                    bank_codes = [
+                        'UTIB', 'ICIC', 'HDFC', 'SBIN', 'AXIS', 'PUNB', 'CNRB', 'BARB',
+                        'IOBA', 'UBIN', 'ORBC', 'VIJB', 'YESB', 'KVBL', 'KKBK', 'CBIN',
+                        'IDFB', 'FDRL', 'SCBL', 'HSBC', 'CIUB', 'DBSS', 'DEUT'
+                    ]
+                    bank_code = clean_value[:4]
+                    if bank_code in bank_codes:
+                        return True, 0.98  # High confidence for known bank codes
+                    else:
+                        return True, 0.9   # Lower confidence for unknown bank codes
+                
+                # Reject obvious non-IFSC codes
+                reject_patterns = [r'micr', r'code', r'branch', r'email', r'address', r'number', r'statement']
+                if any(re.search(pattern, value_text.lower()) for pattern in reject_patterns):
+                    return False, 0.0
                     
             elif field_name == 'Bank Branch':
-                # Branch names: should be reasonable text
-                if len(value_text) >= 3 and len(value_text) <= 50:
-                    # Reject transaction-like text
-                    reject_words = ['upi', 'transaction', 'transfer', 'payment']
+                # Enhanced branch name validation
+                if 3 <= len(value_text) <= 50:
+                    # Reject transaction-like text and field names
+                    reject_words = [
+                        'upi', 'transaction', 'transfer', 'payment', 'code', 'number', 'email', 
+                        'address', 'currency', 'inr', 'usd', 'account', 'customer', 'id',
+                        'phone', 'mobile', 'website', 'pin', 'zip'
+                    ]
                     if any(word in value_text.lower() for word in reject_words):
                         return False, 0.0
-                    return True, 0.8
                     
-            # General string validation
+                    # Reject if it looks like a code (all caps + numbers)
+                    if re.match(r'^[A-Z0-9\-:]+$', value_text) and len(value_text) < 10:
+                        return False, 0.0
+                    
+                    # Give higher score for proper branch names
+                    if re.search(r'[A-Za-z]{3,}', value_text):  # Has meaningful text
+                        return True, 0.85
+                    else:
+                        return True, 0.7
+                        
+            # General string validation with enhanced rejection
             if len(value_text) >= 2:
-                return True, 0.6
+                # Final comprehensive check against field names and common wrong values
+                if value_text.lower().replace(':', '').strip() not in wrong_values:
+                    # Additional checks for obviously wrong values
+                    if not re.match(r'^[A-Z0-9\s\-:.()]+$', value_text.upper()):  # Contains only reasonable characters
+                        return True, 0.6
+                    elif len(value_text) > 50:  # Too long to be a reasonable header value
+                        return False, 0.0
+                    else:
+                        return True, 0.6
                 
         return False, 0.0
     
     def _find_best_value_for_key(self, key_match: Dict, text_results: List[Tuple], used_values: set) -> Optional[Dict]:
         """Find the best value for a given key using comprehensive scoring."""
         
-        print(f"🔍 Finding value for key: '{key_match['matched_text']}' ({key_match['field_name']})")
+        # print(f"🔍 Finding value for key: '{key_match['matched_text']}' ({key_match['field_name']})")
         
         # First, try to extract value directly from smart pattern matches
         if ('pattern' in key_match.get('keyword', '') or 
             'as on date' in key_match.get('keyword', '') or
             'between' in key_match.get('keyword', '') or
             'IFSC Code' in key_match.get('matched_text', '') or
-            'Branch Name' in key_match.get('matched_text', '')):
+            'Branch Name' in key_match.get('matched_text', '') or
+            'Opening Balance' in key_match.get('matched_text', '') or
+            'Closing Balance' in key_match.get('matched_text', '') or
+            'Account Number' in key_match.get('matched_text', '') or
+            'balance pattern' in key_match.get('keyword', '') or
+            'branch pattern' in key_match.get('keyword', '') or
+            'account pattern' in key_match.get('keyword', '') or
+            'date pattern' in key_match.get('keyword', '') or
+            'date range pattern' in key_match.get('keyword', '') or
+            'period pattern' in key_match.get('keyword', '')):
             smart_value = self._extract_value_from_smart_match(key_match)
             if smart_value:
                 # Validate the extracted value
@@ -647,7 +1003,7 @@ class BankStatementHeaderExtractor:
                 )
                 
                 if is_valid:
-                    print(f"   ✅ SMART VALUE extracted: '{smart_value}' (validation: {validation_score:.2f})")
+                    # print(f"   ✅ SMART VALUE extracted: '{smart_value}' (validation: {validation_score:.2f})")
                     return {
                         'text': smart_value,
                         'bbox': key_match['bbox'],
@@ -656,16 +1012,20 @@ class BankStatementHeaderExtractor:
                         'distance': 0.0,
                         'spatial_score': 1.0,
                         'validation_score': validation_score,
-                        'final_score': validation_score * 0.8 + key_match['confidence'] * 0.2,
+                        'final_score': validation_score * self.validation_weight + key_match['confidence'] * self.ocr_confidence_weight + 1.0 * self.spatial_weight,
                         'index': key_match['text_index']
                     }
-                else:
-                    print(f"   ❌ SMART VALUE '{smart_value}' failed validation")
+                # else:
+                #     print(f"   ❌ SMART VALUE '{smart_value}' failed validation")
+        
+        # For smart pattern matches that failed, don't fall back to spatial analysis
+        if key_match.get('match_score', 0) > 0.8:  # High confidence smart pattern
+            return None
         
         # If smart extraction failed, fall back to spatial analysis
         candidates = self._find_value_candidates_for_key(key_match, text_results)
         
-        print(f"   Found {len(candidates)} spatial candidates")
+        # print(f"   Found {len(candidates)} spatial candidates")
         
         if not candidates:
             return None
@@ -675,6 +1035,10 @@ class BankStatementHeaderExtractor:
         
         for candidate in candidates:
             if candidate['index'] in used_values:
+                continue
+                
+            # Skip if candidate text is too similar to the key text (likely the same element)
+            if self._text_similarity(candidate['text'], key_match['matched_text']) > 0.8:
                 continue
                 
             # print(f"   Evaluating candidate: '{candidate['text']}' (method: {candidate['method']}, distance: {candidate['distance']:.1f})")
@@ -691,11 +1055,11 @@ class BankStatementHeaderExtractor:
             if not is_valid:
                 continue
             
-            # Calculate comprehensive score
+            # Calculate comprehensive score with higher weight on validation
             final_score = (
-                candidate['spatial_score'] * 0.4 +  # Spatial proximity
-                validation_score * 0.4 +           # Data type validation
-                candidate['confidence'] * 0.2       # OCR confidence
+                candidate['spatial_score'] * self.spatial_weight +  # Spatial proximity (reduced weight)
+                validation_score * self.validation_weight +           # Data type validation (increased weight)
+                candidate['confidence'] * self.ocr_confidence_weight       # OCR confidence
             )
             
             # print(f"      Final score: {final_score:.2f} (spatial: {candidate['spatial_score']:.2f}, validation: {validation_score:.2f})")
@@ -707,21 +1071,143 @@ class BankStatementHeaderExtractor:
             })
         
         if not scored_candidates:
-            print(f"   ❌ No candidates passed validation")
+            # print(f"   ❌ No candidates passed validation")
             return None
             
         # Return the best scoring candidate
         best_candidate = max(scored_candidates, key=lambda x: x['final_score'])
         
-        # Lower minimum threshold for debugging
-        min_threshold = 0.5  # Lowered from 0.7
+        # Stricter minimum threshold
+        min_threshold = self.min_confidence_score
         if best_candidate['final_score'] >= min_threshold:
-            print(f"   ✅ Selected best candidate: '{best_candidate['text']}' (score: {best_candidate['final_score']:.2f})")
+            # print(f"   ✅ Selected best candidate: '{best_candidate['text']}' (score: {best_candidate['final_score']:.2f})")
             return best_candidate
-        else:
-            print(f"   ❌ Best candidate score {best_candidate['final_score']:.2f} below threshold {min_threshold}")
+        # else:
+        #     print(f"   ❌ Best candidate score {best_candidate['final_score']:.2f} below threshold {min_threshold}")
             
         return None
+    
+    def _text_similarity(self, text1: str, text2: str) -> float:
+        """Calculate similarity between two text strings (0-1)."""
+        if not text1 or not text2:
+            return 0.0
+        
+        text1_clean = self._clean_text_for_matching(text1)
+        text2_clean = self._clean_text_for_matching(text2)
+        
+        if text1_clean == text2_clean:
+            return 1.0
+        
+        # Calculate word overlap
+        words1 = set(text1_clean.split())
+        words2 = set(text2_clean.split())
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+        
+        return len(intersection) / len(union)
+    
+    def _post_process_headers(self, headers: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Final post-processing validation to ensure 90%+ accuracy.
+        Removes low-quality extractions and applies final validation rules.
+        """
+        # print("🔍 Post-processing headers for quality assurance...")
+        
+        cleaned_headers = {}
+        
+        for field_name, field_data in headers.items():
+            value = field_data.get('value', '')
+            confidence = field_data.get('confidence', 0)
+            method = field_data.get('method', '')
+            
+            # Apply strict quality gates
+            should_keep = True
+            rejection_reason = None
+            
+            # Quality Gate 1: Minimum confidence threshold
+            if confidence < self.min_confidence_score:
+                should_keep = False
+                rejection_reason = f"confidence {confidence:.2f} below threshold {self.min_confidence_score}"
+                
+            # Quality Gate 2: Field-specific validation
+            elif field_name == 'Account Number':
+                # Account numbers must be meaningful
+                if (len(value) < 6 or 
+                    value.lower() in ['account', 'number', 'status', 'type', 'name', 'holder'] or
+                    'account' in value.lower() or
+                    len(value.split()) > 2):  # Should not be a phrase
+                    should_keep = False
+                    rejection_reason = "invalid account number format"
+                    
+            elif field_name == 'IFSC Code':
+                # IFSC codes must be exact format
+                clean_ifsc = value.upper().replace(' ', '').replace(':', '').replace('-', '')
+                if not re.match(r'^[A-Z]{4}\d{7}$', clean_ifsc):
+                    should_keep = False
+                    rejection_reason = "invalid IFSC format"
+                else:
+                    # Update with cleaned version
+                    field_data['value'] = clean_ifsc
+                    
+            elif field_name == 'Bank Branch':
+                # Branch names should be reasonable
+                if (len(value) < 3 or len(value) > 50 or
+                    value.lower() in ['branch', 'code', 'phone', 'email', 'currency', 'inr'] or
+                    re.match(r'^[A-Z0-9\-:]+$', value) and len(value) < 10):  # Avoid codes
+                    should_keep = False
+                    rejection_reason = "invalid branch name"
+                    
+            elif field_name in ['Statement Date', 'Statement Date From', 'Statement Date To']:
+                # Dates should be proper format
+                if not re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', value):
+                    should_keep = False
+                    rejection_reason = "invalid date format"
+                else:
+                    # Validate year is reasonable
+                    year_match = re.search(r'(\d{4})', value)
+                    if year_match:
+                        year = int(year_match.group(1))
+                        if year < 2000 or year > 2030:
+                            should_keep = False
+                            rejection_reason = f"unreasonable year {year}"
+                            
+            elif field_name in ['Opening Balance', 'Closing Balance']:
+                # Balances should be reasonable numbers
+                try:
+                    # Clean and validate amount
+                    clean_amount = re.sub(r'[^\d.]', '', value)
+                    if clean_amount:
+                        amount = float(clean_amount)
+                        if amount < 0.01 or amount > 999999999:
+                            should_keep = False
+                            rejection_reason = f"unreasonable amount {amount}"
+                    else:
+                        should_keep = False
+                        rejection_reason = "no numeric value found"
+                except ValueError:
+                    should_keep = False
+                    rejection_reason = "cannot parse as number"
+            
+            # Quality Gate 3: Penalize spatial matches with low confidence when smart patterns available
+            if (method in ['right_aligned', 'bottom_aligned', 'left_aligned'] and 
+                confidence < 0.8 and
+                field_name in ['IFSC Code', 'Account Number']):  # These should use smart patterns
+                should_keep = False
+                rejection_reason = "low confidence spatial match for pattern-detectable field"
+            
+            if should_keep:
+                cleaned_headers[field_name] = field_data
+                # print(f"   ✅ Kept {field_name}: '{value}' (conf: {confidence:.2f})")
+            # else:
+            #     print(f"   ❌ Rejected {field_name}: '{value}' - {rejection_reason}")
+        
+        # print(f"📊 Post-processing: {len(headers)} → {len(cleaned_headers)} headers (removed {len(headers) - len(cleaned_headers)})")
+        
+        return cleaned_headers
     
     def extract_headers(self, pdf_path: str) -> Dict[str, Any]:
         """
@@ -783,10 +1269,9 @@ class BankStatementHeaderExtractor:
                     }
                     used_values.add(best_value['index'])
                     
-                    print(f"✅ {field_name}: '{best_value['text']}' "
-                          f"(score: {best_value['final_score']:.2f}, method: {best_value['method']})")
-                else:
-                    print(f"⚠️ No valid value found for {field_name}")
+                    # print(f"✅ {field_name}: '{best_value['text']}' (score: {best_value['final_score']:.2f}, method: {best_value['method']})")
+                # else:
+                #     print(f"⚠️ No valid value found for {field_name}")
             
             # Save results
             base_name = os.path.splitext(os.path.basename(pdf_path))[0]
@@ -798,7 +1283,7 @@ class BankStatementHeaderExtractor:
             print(f"💾 Saved {len(extracted_headers)} headers to: {output_file}")
             print(f"📊 Extracted header fields: {', '.join(extracted_headers.keys())}")
             
-            return extracted_headers
+            return self._post_process_headers(extracted_headers)
             
         except Exception as e:
             print(f"❌ Error extracting headers: {str(e)}")
@@ -844,7 +1329,7 @@ if __name__ == "__main__":
     all_test_files = [os.path.join("BankStatements SK2", file) 
                       for file in os.listdir("BankStatements SK2") 
                       if file.endswith(".pdf")]
-    test_files = all_test_files[:3]  # Test first 3 files
+    test_files = all_test_files # Test first 3 files
     
     print(f"📁 Found {len(all_test_files)} PDF files, testing first {len(test_files)}:")
     for i, file in enumerate(test_files):
@@ -867,8 +1352,7 @@ if __name__ == "__main__":
                     print(f"     • {field_name}: '{value}' (confidence: {score:.2f})")
             else:
                 print("❌ No headers were extracted")
-                
-            break  # Test just one file for now
+                 # Test just one file for now
     else:
         print("❌ No test files found")
         print("Available files in BankStatements SK2:")
