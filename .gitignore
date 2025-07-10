@@ -1,0 +1,12 @@
+/venv*
+/bank_statement_output
+/BankStatements SK2
+/header_extraction_output
+/BankStatements_Results
+/bs_reconstructed_pdfs
+/bs_tables_extracted
+*.pdf
+*.csv
+*.txt
+*.json
+__pycache__
