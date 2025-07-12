@@ -7,7 +7,6 @@
 /bs_tables_extracted
 *.pdf
 *.csv
-*.txt
 *.json
 __pycache__
 *.xlsx
