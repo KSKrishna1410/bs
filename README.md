@@ -18,7 +18,8 @@ A comprehensive system for extracting headers and transaction tables from bank s
 - **Data Validation**: Filters out irrelevant rows and headers
 
 ### 🔧 **Processing Methods**
-- **OCR Pipeline**: Handles both readable and scanned PDFs
+- **OCR Pipeline**: Handles readable PDFs, scanned PDFs, and image files (PNG, JPG, JPEG, BMP, TIFF, TIF)
+- **Image-to-PDF Conversion**: Automatically converts images to PDF using OCR reconstruction
 - **Multi-tier Account Detection**: Keyword → Regex → Label Proximity
 - **Fragmented Number Handling**: Reconstructs account numbers split across text elements
 - **Smart Validation**: Context-aware filtering to prevent false positives
@@ -91,6 +92,14 @@ curl -X POST "http://localhost:8888/ocr_process/" \
   -F "doctype=BANKSTMT"
 ```
 
+**Note**: You can also upload image files:
+```bash
+curl -X POST "http://localhost:8888/ocr_process/" \
+  -F "file=@bank_statement.jpg" \
+  -F "output_dir=" \
+  -F "doctype=BANKSTMT"
+```
+
 ## 📱 **Web UI Features**
 
 ### **📄 PDF Preview & Processing**
@@ -120,7 +129,7 @@ curl -X POST "http://localhost:8888/ocr_process/" \
 Process a bank statement file and extract headers and tables.
 
 **Parameters:**
-- `file` (required): PDF file to process
+- `file` (required): PDF or image file to process (supported: PDF, PNG, JPG, JPEG, BMP, TIFF, TIF)
 - `output_dir` (optional): Output directory (leave blank)
 - `doctype` (required): Document type ("BANKSTMT")
 

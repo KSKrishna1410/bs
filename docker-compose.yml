@@ -1,0 +1,59 @@
+services:
+  # Backend API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8888:8888"
+    environment:
+      - PYTHONPATH=/app
+      - API_HOST=0.0.0.0
+      - API_PORT=8888
+    volumes:
+      - ./comprehensive_output:/app/comprehensive_output
+      - ./bank_statement_output:/app/bank_statement_output
+      - ./bs_reconstructed_pdfs:/app/bs_reconstructed_pdfs
+      - ./ocr_outputs_reconstructed:/app/ocr_outputs_reconstructed
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - nekkanti-network
+
+  # Frontend Streamlit Service
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://api:8888
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - USER_PASSWORD=${USER_PASSWORD:-user123}
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - nekkanti-network
+
+networks:
+  nekkanti-network:
+    driver: bridge
+
+volumes:
+  output_data:
+    driver: local 

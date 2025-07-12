@@ -1,0 +1,81 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.pytest_cache/
+
+# Virtual environments
+venv/
+venv-v5/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Output directories (will be mounted as volumes)
+comprehensive_output/
+bank_statement_output/
+bs_reconstructed_pdfs/
+ocr_outputs_reconstructed/
+header_extraction_output/
+BankStatements_Results/
+bs_tables_extracted/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+test_*.json
+*_test.py
+
+# Bank statement sample files (large files)
+BankStatements SK2/
+*.pdf
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Docker files (only needed for context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore 

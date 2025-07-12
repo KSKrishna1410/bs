@@ -494,13 +494,37 @@ class BankStatementExtractor:
             
             # Load extracted tables and analyze them
             excel_file = None
-            for file in os.listdir(self.table_extractor.output_dir):
-                if file.endswith('.xlsx') and os.path.basename(pdf_path).replace('.pdf', '') in file:
-                    excel_file = os.path.join(self.table_extractor.output_dir, file)
-                    break
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]  # Remove any extension
+            
+            # Try to find the Excel file in the expected directory
+            search_directories = [
+                self.table_extractor.output_dir,
+                os.path.join(self.table_extractor.output_dir, "extracted_tables"),
+                self.output_dir
+            ]
+            
+            for search_dir in search_directories:
+                if os.path.exists(search_dir):
+                    for file in os.listdir(search_dir):
+                        if file.endswith('.xlsx') and base_name in file:
+                            excel_file = os.path.join(search_dir, file)
+                            print(f"   ✅ Found Excel file: {excel_file}")
+                            break
+                    if excel_file:
+                        break
             
             if not excel_file or not os.path.exists(excel_file):
                 print("❌ Could not find extracted tables Excel file")
+                print(f"   Looking for file containing: {base_name}")
+                for search_dir in search_directories:
+                    if os.path.exists(search_dir):
+                        print(f"   Available files in {search_dir}:")
+                        try:
+                            for file in os.listdir(search_dir):
+                                if file.endswith('.xlsx'):
+                                    print(f"     - {file}")
+                        except Exception as e:
+                            print(f"     Error listing files: {e}")
                 return None
             
             # Read all sheets and analyze
@@ -645,7 +669,8 @@ class BankStatementExtractor:
             return None
             
         finally:
-            if cleanup_temp:
+            # Only cleanup temp files after successful processing
+            if cleanup_temp and 'consolidated_df' in locals():
                 self.table_extractor.cleanup_all_temp_files()
     
     def process_multiple_files(self, pdf_files: List[str], cleanup_temp: bool = True) -> Dict[str, Optional[pd.DataFrame]]:

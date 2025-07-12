@@ -16,6 +16,58 @@ import io
 import time
 import base64
 from datetime import datetime
+import os
+
+# Authentication configuration
+AUTH_CREDENTIALS = {
+    "admin": os.getenv("ADMIN_PASSWORD", "admin123"),
+    "user": os.getenv("USER_PASSWORD", "user123"),
+    "demo": os.getenv("DEMO_PASSWORD", "demo123")
+}
+
+def check_authentication():
+    """Check if user is authenticated"""
+    return st.session_state.get("authenticated", False)
+
+def login_form():
+    """Display login form"""
+    st.title("🔐 Nekkanti OCR - Login")
+    st.markdown("---")
+    
+    with st.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        
+        with col2:
+            st.markdown("### Please Login to Continue")
+            
+            with st.form("login_form"):
+                username = st.text_input("Username", placeholder="Enter username")
+                password = st.text_input("Password", type="password", placeholder="Enter password")
+                submit_button = st.form_submit_button("Login")
+                
+                if submit_button:
+                    if username in AUTH_CREDENTIALS and AUTH_CREDENTIALS[username] == password:
+                        st.session_state.authenticated = True
+                        st.session_state.username = username
+                        st.success("✅ Login successful!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid username or password")
+            
+            # Demo credentials info
+            with st.expander("📋 Demo Credentials"):
+                st.markdown("""
+                **Available Demo Accounts:**
+                - Username: `admin`, Password: `admin123`
+                - Username: `user`, Password: `user123`  
+                - Username: `demo`, Password: `demo123`
+                """)
+
+def logout():
+    """Logout user"""
+    st.session_state.authenticated = False
+    st.session_state.username = None
+    st.rerun()
 
 # Page configuration
 st.set_page_config(
@@ -67,7 +119,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # API Configuration
-API_BASE_URL = "http://localhost:8888"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8888")
 API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
 
 def check_api_health() -> bool:
@@ -217,38 +269,67 @@ def display_summary_metrics(response_data: dict) -> None:
         st.metric("Table Rows", table_rows)
 
 
-def display_pdf_preview(pdf_bytes: bytes, filename: str) -> None:
-    """Display PDF preview in Streamlit"""
-    st.subheader("📄 PDF Preview")
+def display_file_preview(file_bytes: bytes, filename: str) -> None:
+    """Display file preview in Streamlit (PDF or Image)"""
+    st.subheader("📄 File Preview")
+    
+    file_extension = filename.lower().split('.')[-1] if '.' in filename else ''
     
     try:
-        # Encode PDF to base64
-        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-        
-        # Create embedded PDF viewer
-        pdf_display = f"""
-        <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf">
-            <p>Your browser does not support PDFs. 
-            <a href="data:application/pdf;base64,{base64_pdf}">Download the PDF</a>.</p>
-        </iframe>
-        """
-        
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        if file_extension == 'pdf':
+            # Display PDF
+            base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
+            
+            pdf_display = f"""
+            <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf">
+                <p>Your browser does not support PDFs. 
+                <a href="data:application/pdf;base64,{base64_pdf}">Download the PDF</a>.</p>
+            </iframe>
+            """
+            
+            st.markdown(pdf_display, unsafe_allow_html=True)
+            
+        elif file_extension in ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif']:
+            # Display Image
+            st.image(file_bytes, caption=filename, use_column_width=True)
+            
+        else:
+            # Fallback for unknown types
+            st.warning(f"Preview not available for {file_extension.upper()} files")
+            st.download_button(
+                label="📥 Download file to view",
+                data=file_bytes,
+                file_name=filename,
+                mime="application/octet-stream"
+            )
         
     except Exception as e:
-        st.error(f"Could not display PDF preview: {str(e)}")
+        st.error(f"Could not display file preview: {str(e)}")
         
         # Fallback: provide download button
+        mime_type = "application/pdf" if file_extension == 'pdf' else f"image/{file_extension}"
         st.download_button(
-            label="📥 Download PDF to view",
-            data=pdf_bytes,
+            label="📥 Download file to view",
+            data=file_bytes,
             file_name=filename,
-            mime="application/pdf"
+            mime=mime_type
         )
 
 def main():
     """Main application"""
     
+    # Authentication check
+    if not check_authentication():
+        login_form()
+        return
+    
+    # Sidebar with user info and logout
+    with st.sidebar:
+        st.markdown(f"👤 **Welcome, {st.session_state.get('username', 'User')}!**")
+        if st.button("🚪 Logout"):
+            logout()
+        st.markdown("---")
+
     # Header
     st.markdown('<div class="main-header">🏦 Nekkanti OCR - Bank Statement Extractor</div>', unsafe_allow_html=True)
     
@@ -256,7 +337,7 @@ def main():
     with st.sidebar:
         st.header("📋 Instructions")
         st.markdown("""
-        1. **Upload** your bank statement PDF file
+        1. **Upload** your bank statement (PDF or image file)
         2. **Process** it through our OCR engine
         3. **View** extracted headers and tables
         4. **Download** results in CSV format
@@ -272,9 +353,9 @@ def main():
     # File upload
     st.header("📤 Upload Bank Statement")
     uploaded_file = st.file_uploader(
-        "Choose a PDF file",
-        type=['pdf'],
-        help="Upload your bank statement in PDF format"
+        "Choose a PDF or Image file",
+        type=['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif'],
+        help="Upload your bank statement in PDF or image format (PNG, JPG, JPEG, BMP, TIFF, TIF)"
     )
     
     if uploaded_file is not None:
@@ -301,9 +382,9 @@ def main():
         with col2:
             process_button = st.button("Process File", type="primary")
         
-        # Display PDF preview
+        # Display file preview
         st.markdown("---")
-        display_pdf_preview(file_bytes, uploaded_file.name)
+        display_file_preview(file_bytes, uploaded_file.name)
         
         if process_button:
             if not check_api_health():

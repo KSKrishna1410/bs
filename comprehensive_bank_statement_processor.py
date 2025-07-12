@@ -378,10 +378,12 @@ class ComprehensiveBankStatementProcessor:
             }
         
         finally:
-            # Cleanup temporary files
+            # Cleanup temporary files (but only after successful processing)
             try:
-                self.header_extractor.table_extractor.cleanup_all_temp_files()
-                self.table_extractor.table_extractor.cleanup_all_temp_files()
+                # Only cleanup if processing was successful
+                if 'response' in locals() and response.get('status_code') == 200:
+                    self.header_extractor.table_extractor.cleanup_all_temp_files()
+                    self.table_extractor.table_extractor.cleanup_all_temp_files()
             except:
                 pass
     

@@ -419,7 +419,8 @@ class DocumentTableExtractor:
             result = self.process_document(input_path)
             return result
         finally:
-            if cleanup_temp:
+            # Only cleanup temp files after successful processing
+            if cleanup_temp and 'result' in locals():
                 self.cleanup_all_temp_files()
 
     def cleanup_temp_directory(self):

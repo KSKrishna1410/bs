@@ -39,7 +39,7 @@ class OCRResponse(BaseModel):
 
 @app.post("/ocr_process/")
 async def ocr_process_file(
-    file: UploadFile = File(..., description="Bank statement file to process"),
+    file: UploadFile = File(..., description="Bank statement file to process (PDF or Image)"),
     output_dir: str = Form("", description="Output directory (should be blank)"),
     doctype: str = Form(..., description="Document type (INVOICE or BANKSTMT)")
 ):
@@ -47,7 +47,7 @@ async def ocr_process_file(
     Process a bank statement file using OCR and extract headers and tables.
     
     Args:
-        file: Uploaded bank statement file (PDF format)
+        file: Uploaded bank statement file (PDF or image format: PNG, JPG, JPEG, BMP, TIFF, TIF)
         output_dir: Output directory (should be blank)
         doctype: Document type - must be "BANKSTMT" for bank statements
     
@@ -70,17 +70,24 @@ async def ocr_process_file(
         )
     
     # Validate file type
-    if not file.filename.lower().endswith('.pdf'):
+    supported_extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']
+    if not any(file.filename.lower().endswith(ext) for ext in supported_extensions):
         raise HTTPException(
             status_code=422,
-            detail="Only PDF files are supported"
+            detail="Supported file types: PDF, PNG, JPG, JPEG, BMP, TIFF, TIF"
         )
     
     # Create temporary file for processing
     temp_file_path = None
     try:
-        # Create temporary file with original filename
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+        # Get file extension from original filename
+        import os
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        if not file_extension:
+            file_extension = '.pdf'  # Default fallback
+        
+        # Create temporary file with correct extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
             temp_file_path = temp_file.name
             
             # Write uploaded file content to temporary file
