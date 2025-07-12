@@ -50,7 +50,7 @@ def login_form():
                         st.session_state.authenticated = True
                         st.session_state.username = username
                         st.success("✅ Login successful!")
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("❌ Invalid username or password")
             
@@ -67,7 +67,7 @@ def logout():
     """Logout user"""
     st.session_state.authenticated = False
     st.session_state.username = None
-    st.experimental_rerun()
+    st.rerun()
 
 # Page configuration
 st.set_page_config(

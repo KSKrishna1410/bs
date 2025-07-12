@@ -936,11 +936,11 @@ class BankStatementHeaderExtractor:
             # Skip if this is the key text itself
             if i == key_match['text_index']:
                 continue
-            
+                
             # Skip very short text unless it could be valid for the data type
             if len(text.strip()) < 2 and key_match['data_type'] != 'String':
                 continue
-                
+            
             val_center_x = (bbox[0][0] + bbox[2][0]) / 2
             val_center_y = (bbox[0][1] + bbox[2][1]) / 2
             val_left = bbox[0][0]
@@ -954,13 +954,13 @@ class BankStatementHeaderExtractor:
                 spatial_score = max(0, 1 - distance / self.max_distance_threshold)
                 
                 candidates.append({
-                    'text': text,
-                    'bbox': bbox,
-                    'confidence': confidence,
-                    'method': 'right_aligned',
-                    'distance': distance,
+                        'text': text,
+                        'bbox': bbox,
+                        'confidence': confidence,
+                        'method': 'right_aligned',
+                        'distance': distance,
                     'spatial_score': spatial_score,
-                    'index': i
+                        'index': i
                 })
             
             # Method 2: Bottom-aligned (value below key, similar x position)
@@ -971,13 +971,13 @@ class BankStatementHeaderExtractor:
                 spatial_score = max(0, 1 - distance / self.max_distance_threshold)
                 
                 candidates.append({
-                    'text': text,
-                    'bbox': bbox,
-                    'confidence': confidence,
-                    'method': 'bottom_aligned', 
-                    'distance': distance,
+                        'text': text,
+                        'bbox': bbox,
+                        'confidence': confidence,
+                        'method': 'bottom_aligned',
+                        'distance': distance,
                     'spatial_score': spatial_score,
-                    'index': i
+                        'index': i
                 })
         
         return candidates
@@ -985,7 +985,7 @@ class BankStatementHeaderExtractor:
     def _validate_and_score_value(self, value_text: str, data_type: str, field_name: str) -> Tuple[bool, float]:
         """
         Enhanced validation with stricter rules for 90%+ accuracy.
-        
+            
         Returns:
             (is_valid, confidence_score)
         """
@@ -1491,10 +1491,10 @@ class BankStatementHeaderExtractor:
                     # Update the template with found values
                     standard_headers[field_name] = {
                         'value': best_value['text'],
-                        'key_text': key_match['matched_text'],
-                        'keyword': key_match['keyword'],
-                        'data_type': key_match['data_type'],
-                        'field_type': key_match['field_type'],
+                            'key_text': key_match['matched_text'],
+                            'keyword': key_match['keyword'],
+                            'data_type': key_match['data_type'],
+                            'field_type': key_match['field_type'],
                         'method': best_value['method'],
                         'distance': best_value['distance'],
                         'confidence': best_value['final_score'],
@@ -1530,7 +1530,7 @@ class BankStatementHeaderExtractor:
                     }
                     found_fields.append('Account Number')
                     print(f"   ✅ Account Number found with regex: {regex_account['text']}")
-                else:
+                    else:
                     print("   ❌ No account number found with regex pattern, trying label proximity...")
                     
                     # Third fallback: Look near account labels
@@ -2009,22 +2009,22 @@ if __name__ == "__main__":
         print(f"   {i+1}. {os.path.basename(file)}")
     
     for test_file in test_files:
-        if os.path.exists(test_file):
+    if os.path.exists(test_file):
             print(f"\n🧪 Testing improved extractor on: {os.path.basename(test_file)}")
             print("="*70)
-            
-            headers = extractor.extract_headers(test_file)
-            
-            if headers:
-                print(f"\n📊 Header Extraction Summary:")
+        
+        headers = extractor.extract_headers(test_file)
+        
+        if headers:
+            print(f"\n📊 Header Extraction Summary:")
                 print(f"   Total header fields extracted: {len(headers)}")
-                
-                for field_name, field_data in headers.items():
+            
+            for field_name, field_data in headers.items():
                     value = field_data['value']
                     score = field_data.get('confidence', 0)
                     print(f"     • {field_name}: '{value}' (confidence: {score:.2f})")
-            else:
-                print("❌ No headers were extracted")
+        else:
+            print("❌ No headers were extracted")
                  # Test just one file for now
     else:
         print("❌ No test files found")

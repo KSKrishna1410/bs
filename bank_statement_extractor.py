@@ -500,22 +500,41 @@ class BankStatementExtractor:
             search_directories = [
                 self.table_extractor.output_dir,
                 os.path.join(self.table_extractor.output_dir, "extracted_tables"),
-                self.output_dir
+                self.output_dir,
+                # Also search in the NekkantiOCR temporary directory for images
+                os.path.join(self.table_extractor.output_dir, "temp_ocr_processing")
+            ]
+            
+            # More flexible file matching - try different naming patterns
+            possible_names = [
+                base_name,
+                base_name.replace("_readable", ""),
+                base_name.replace("_reconstructed", ""),
+                base_name.replace("_temp", ""),
+                # Handle cases where the input had different extensions
+                os.path.splitext(base_name)[0]
             ]
             
             for search_dir in search_directories:
                 if os.path.exists(search_dir):
                     for file in os.listdir(search_dir):
-                        if file.endswith('.xlsx') and base_name in file:
-                            excel_file = os.path.join(search_dir, file)
-                            print(f"   ✅ Found Excel file: {excel_file}")
-                            break
+                        if file.endswith('.xlsx'):
+                            # Try exact match first
+                            if any(name == file.replace('.xlsx', '') for name in possible_names):
+                                excel_file = os.path.join(search_dir, file)
+                                print(f"   ✅ Found Excel file (exact match): {excel_file}")
+                                break
+                            # Try partial match
+                            elif any(name in file for name in possible_names):
+                                excel_file = os.path.join(search_dir, file)
+                                print(f"   ✅ Found Excel file (partial match): {excel_file}")
+                                break
                     if excel_file:
                         break
             
             if not excel_file or not os.path.exists(excel_file):
                 print("❌ Could not find extracted tables Excel file")
-                print(f"   Looking for file containing: {base_name}")
+                print(f"   Looking for file containing any of: {possible_names}")
                 for search_dir in search_directories:
                     if os.path.exists(search_dir):
                         print(f"   Available files in {search_dir}:")

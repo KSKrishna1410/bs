@@ -303,9 +303,16 @@ class DocumentTableExtractor:
                 base_name = base_name[:-9]
             elif base_name.endswith("_reconstructed"):
                 base_name = base_name[:-14]
+            elif base_name.endswith("_temp"):
+                base_name = base_name[:-5]
             
             # Create Excel file in DocumentTableExtractor's output directory
             output_path = os.path.join(self.output_dir, f"{base_name}.xlsx")
+            
+            # Debug: Print file path for troubleshooting
+            print(f"📁 Creating Excel file at: {output_path}")
+            print(f"📁 Base name used: {base_name}")
+            print(f"📁 Original input: {input_path}")
             
             # Convert NekkantiOCR results to our format and save to Excel
             formatted_tables = []
@@ -355,6 +362,26 @@ class DocumentTableExtractor:
                     print(f"⚠️ Warning: Could not save reconstructed PDF: {e}")
             
             print(f"✅ Successfully extracted {len(formatted_tables)} table(s) using NekkantiOCR")
+            
+            # Ensure file exists in expected locations for BankStatementExtractor
+            backup_locations = [
+                os.path.join(self.output_dir, "extracted_tables", f"{base_name}.xlsx"),
+                os.path.join(self.output_dir, "temp_ocr_processing", f"{base_name}.xlsx")
+            ]
+            
+            for backup_location in backup_locations:
+                backup_dir = os.path.dirname(backup_location)
+                if not os.path.exists(backup_dir):
+                    os.makedirs(backup_dir, exist_ok=True)
+                
+                if os.path.exists(output_path) and not os.path.exists(backup_location):
+                    try:
+                        import shutil
+                        shutil.copy2(output_path, backup_location)
+                        print(f"📋 Backup copy created: {backup_location}")
+                    except Exception as e:
+                        print(f"⚠️ Warning: Could not create backup copy: {e}")
+            
             return formatted_tables
             
         except Exception as e:
