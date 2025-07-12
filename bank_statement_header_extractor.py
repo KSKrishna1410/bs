@@ -1530,7 +1530,7 @@ class BankStatementHeaderExtractor:
                     }
                     found_fields.append('Account Number')
                     print(f"   ✅ Account Number found with regex: {regex_account['text']}")
-                    else:
+                else:
                     print("   ❌ No account number found with regex pattern, trying label proximity...")
                     
                     # Third fallback: Look near account labels
@@ -2009,29 +2009,28 @@ if __name__ == "__main__":
         print(f"   {i+1}. {os.path.basename(file)}")
     
     for test_file in test_files:
-    if os.path.exists(test_file):
+        if os.path.exists(test_file):
             print(f"\n🧪 Testing improved extractor on: {os.path.basename(test_file)}")
             print("="*70)
         
-        headers = extractor.extract_headers(test_file)
-        
-        if headers:
-            print(f"\n📊 Header Extraction Summary:")
-                print(f"   Total header fields extracted: {len(headers)}")
+            headers = extractor.extract_headers(test_file)
             
-            for field_name, field_data in headers.items():
+            if headers:
+                print(f"\n📊 Header Extraction Summary:")
+                print(f"   Total header fields extracted: {len(headers)}")
+                
+                for field_name, field_data in headers.items():
                     value = field_data['value']
                     score = field_data.get('confidence', 0)
                     print(f"     • {field_name}: '{value}' (confidence: {score:.2f})")
+            else:
+                print("❌ No headers were extracted")
         else:
-            print("❌ No headers were extracted")
-                 # Test just one file for now
-    else:
-        print("❌ No test files found")
-        print("Available files in BankStatements SK2:")
-        try:
-            for file in os.listdir("BankStatements SK2"):
-                if file.endswith(".pdf"):
-                    print(f"  - {file}")
-        except:
-            print("  Could not list directory") 
+            print("❌ No test files found")
+            print("Available files in BankStatements SK2:")
+            try:
+                for file in os.listdir("BankStatements SK2"):
+                    if file.endswith(".pdf"):
+                        print(f"  - {file}")
+            except:
+                print("  Could not list directory")
