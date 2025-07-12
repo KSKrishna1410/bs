@@ -35,11 +35,11 @@ RUN mkdir -p comprehensive_output && \
     mkdir -p ocr_outputs_reconstructed
 
 # Expose the API port
-EXPOSE 8888
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8888/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Start the API server
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8888", "--log-level", "info"] 
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"] 

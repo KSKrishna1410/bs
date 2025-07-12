@@ -1,0 +1,104 @@
+"field_name","key","data_type","field_type"
+Statement Date,Generated On,Date,Header
+Statement Date,Statement Date,Date,Header
+Statement Date,Statement Request/Download Date,Date,Header
+Statement Date,Date,Date,Header
+Statement Date,Date of Statement,Date,Header
+Statement Date,Statement date,Date,Header
+Statement Date,DATE,Date,Header
+Statement Date From,STATEMENT PERIOD FROM,Date,Header
+Statement Date From,Transaction Date From,Date,Header
+Statement Date From,STATEMENT PERIOD,Date,Header
+Statement Date From,Statement From,Date,Header
+Statement Date From,From,Date,Header
+Statement Date From,(From,Date,Header
+Statement Date From,Transaction Period,Date,Header
+Statement Date From,Statement Period From,Date,Header
+Statement Date From,Statement for the Period From,Date,Header
+Statement Date From,Detailed Statement for a/c no.,Date,Header
+Statement Date From,Period From,Date,Header
+Statement Date From,Period,Date,Header
+Statement Date To,Transaction Period,Date,Header
+Statement Date To,STATEMENT PERIOD,Date,Header
+Statement Date To,To,Date,Header
+Statement Date To,Period To,Date,Header
+Statement Date To,Detailed Statement for a/c no.,Date,Header
+Statement Date To,Statement Period From,Date,Header
+Statement Date To,Statement To,Date,Header
+Statement Date To,Transaction Date To,Date,Header
+Statement Date To,Statement for the Period to,Date,Header
+Statement Date To,Statement from,Date,Header
+Statement Date To,Period,Date,Header
+Statement Date To,STATEMENT PERIOD TO,Date,Header
+Closing Balance,Closing Bal,Double,Header
+Closing Balance,CLOSING BALANCE,Double,Header
+Opening Balance,OPENING BALANCE,Double,Header
+Opening Balance,BROUGHT FORWARD,Double,Header
+Account Number,Account No.,String,Header
+Account Number,A/C No,String,Header
+Account Number,Account No,String,Header
+Account Number,Account Number - ,String,Header
+Account Number,ACCOUNT NO,String,Header
+Account Number,Account Number,String,Header
+Account Number,Statement of Account No,String,Header
+Account Number,for Account Number,String,Header
+Account Number,Account Number -,String,Header
+Account Number,Statement of Axis Account No,String,Header
+Bank Branch,Branch Name,String,Header
+Bank Branch,Account Branch,String,Header
+Bank Branch,ACCOUNT BRANCH,String,Header
+Bank Branch,Branch,String,Header
+IFSC Code,RTGS/NEFT IFSC,String,Header
+IFSC Code,AFSC,String,Header
+IFSC Code,IFSC CODE,String,Header
+IFSC Code,IFSC Code,String,Header
+IFSC Code,IFSC,String,Header
+Transaction Date,Post Date,Date,Line
+Transaction Date,Trans Date,Date,Line
+Transaction Date,Txn Date,Date,Line
+Transaction Date,DATE,Date,Line
+Transaction Date,Transaction Date,Date,Line
+Transaction Date,Tran Date,Date,Line
+Value Date,VALUE DATE,Date,Line
+Value Date,Value Dt,Date,Line
+Balance,BALANCE,Double,Line
+Balance,Closing Balance,Double,Line
+Balance,Balance(INR),Double,Line
+Credit,Deposit(Cr),Double,Line
+Credit,DEPOSITS,Double,Line
+Credit,Type,Double,Line
+Credit,Deposit Amt,Double,Line
+Credit,CREDIT,Double,Line
+Credit,Deposit (Cr),Double,Line
+Credit,Deposit Amt.,Double,Line
+Credit,DR/CR,Double,Line
+Credit,Withdrawal (Dr)/ Deposit (Cr),Double,Line
+Credit,DEPOSIT,Double,Line
+Debit,WITHDRAWS,Double,Line
+Debit,Withdrawals,Double,Line
+Debit,Withdrawal Amt.,Double,Line
+Debit,DR/CR,Double,Line
+Debit,DEBIT,Double,Line
+Debit,Type,Double,Line
+Debit,Withdrawl (Dr),Double,Line
+Debit,Withdrawal (Dr)/ Deposit (Cr),Double,Line
+Description,Description,String,Line
+Description,Narration,String,Line
+Description,DESCRIPTION,String,Line
+Description,Remarks,String,Line
+Description,Transaction Remarks,String,Line
+Description,Transaction,String,Line
+Description,NARATION,String,Line
+Description,Transaction Particulars,String,Line
+Description,Particulars,String,Line
+Reference Number,Ref No,String,Line
+Reference Number, Cheque No/Reference ,String,Line
+Reference Number,Cheque No,String,Line
+Reference Number,Chq./Ref.No.,String,Line
+Reference Number,REFERENCE NUMBER,String,Line
+Reference Number,Reference Number,String,Line
+table_start_position,Withdrawals,String,Others
+table_start_position,Transaction,String,Others
+table_start_position,Balance,String,Others
+table_start_position,Deposits,String,Others
+table_start_position,Txn Date,String,Others

@@ -18,7 +18,7 @@ import requests
 def check_api_health():
     """Check if the API is running"""
     try:
-        response = requests.get("http://localhost:8888/health", timeout=5)
+        response = requests.get("http://localhost:8000/health", timeout=5)
         return response.status_code == 200
     except:
         return False
@@ -38,7 +38,7 @@ def run_api_server():
         print("⏳ Waiting for API server to start...")
         for i in range(30):  # Wait up to 30 seconds
             if check_api_health():
-                print("✅ API server is running at http://localhost:8888")
+                print("✅ API server is running at http://localhost:8000")
                 return api_process
             time.sleep(1)
         
@@ -104,9 +104,9 @@ def main():
             return
         
         print("\n🎉 Both services are running!")
-        print("📊 API Server: http://localhost:8888")
+        print("📊 API Server: http://localhost:8000")
         print("🎨 Streamlit App: http://localhost:8501")
-        print("📖 API Documentation: http://localhost:8888/docs")
+        print("📖 API Documentation: http://localhost:8000/docs")
         print("\nPress Ctrl+C to stop both services...")
         
         # Keep running until interrupted

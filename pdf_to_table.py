@@ -6,7 +6,7 @@ import cv2
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from paddleocr import PaddleOCR
-import pymupdf
+import fitz  # PyMuPDF
 import pandas as pd
 import warnings
 from img2table.document import PDF

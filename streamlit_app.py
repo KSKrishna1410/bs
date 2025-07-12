@@ -119,7 +119,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # API Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8888")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
 
 def check_api_health() -> bool:

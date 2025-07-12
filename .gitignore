@@ -6,7 +6,6 @@
 /bs_reconstructed_pdfs
 /bs_tables_extracted
 *.pdf
-*.csv
 *.json
 __pycache__
 *.xlsx
