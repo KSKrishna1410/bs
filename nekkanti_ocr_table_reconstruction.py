@@ -133,26 +133,55 @@ class NekkantiOCR:
     
     def _pdf_to_images(self, pdf_path):
         """Convert PDF pages to temporary image files."""
-        doc = pymupdf.open(pdf_path)
-        temp_image_paths = []
-        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        import fitz  # Make sure we have the right import
         
-        # Ensure the output directory exists
+        # Ensure the output directory exists with proper permissions
         os.makedirs(self.output_dir, exist_ok=True)
+        print(f"📁 Using OCR output directory: {self.output_dir}")
         
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            # Convert page to image (with high DPI for better OCR)
-            pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))  # 2x scaling for better quality
+        try:
+            doc = fitz.open(pdf_path)
+            temp_image_paths = []
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
             
-            # Save as temporary image
-            temp_image_path = os.path.join(self.output_dir, f"{base_name}_temp_page{page_num + 1}.png")
-            pix.save(temp_image_path)
-            temp_image_paths.append(temp_image_path)
+            print(f"📄 Converting PDF to images: {len(doc)} pages")
             
-        doc.close()
-        return temp_image_paths
-    
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                
+                # Convert page to image (with high DPI for better OCR)
+                try:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x scaling for better quality
+                    
+                    # Create temporary image path
+                    temp_image_path = os.path.join(self.output_dir, f"{base_name}_temp_page{page_num + 1}.png")
+                    
+                    # Save the image
+                    pix.save(temp_image_path)
+                    
+                    # Verify the file was created
+                    if os.path.exists(temp_image_path):
+                        temp_image_paths.append(temp_image_path)
+                        print(f"✅ Created temp image: {os.path.basename(temp_image_path)}")
+                    else:
+                        print(f"❌ Failed to create temp image: {temp_image_path}")
+                        
+                except Exception as page_error:
+                    print(f"❌ Error converting page {page_num + 1}: {page_error}")
+                    continue
+                    
+            doc.close()
+            
+            if not temp_image_paths:
+                raise RuntimeError(f"No temporary images were created from PDF: {pdf_path}")
+                
+            print(f"✅ Successfully created {len(temp_image_paths)} temporary images")
+            return temp_image_paths
+            
+        except Exception as e:
+            print(f"❌ Error converting PDF to images: {e}")
+            raise
+
     def _cleanup_temp_files(self, temp_files):
         """Remove temporary files."""
         for temp_file in temp_files:
@@ -166,6 +195,8 @@ class NekkantiOCR:
         temp_image_paths = []
         
         try:
+            print(f"🔄 Starting OCR and reconstruction for: {os.path.basename(input_path)}")
+            
             # Check if input is PDF or image
             if self._is_pdf(input_path):
                 print(f"📄 Converting PDF to images for OCR processing...")
@@ -180,27 +211,38 @@ class NekkantiOCR:
                 # It's an image file
                 primary_image_path = input_path
             
+            # Verify primary image exists and is readable
+            if not os.path.exists(primary_image_path):
+                raise FileNotFoundError(f"Primary image not found: {primary_image_path}")
+            
             # Get original image dimensions
             img = cv2.imread(primary_image_path)
             if img is None:
                 raise ValueError(f"Could not read image at {primary_image_path}")
             self.original_height = img.shape[0]
             self.original_width = img.shape[1]
+            print(f"📐 Image dimensions: {self.original_width}x{self.original_height}")
 
             # Run OCR on the input (PaddleOCR can handle both images and PDFs)
+            print(f"🔍 Running OCR on input...")
             result = self.ocr.predict(input_path)
             ocr_data = [self.convert_ndarray(dict(res)) for res in result]
+            print(f"📝 OCR completed: {len(ocr_data)} pages processed")
 
+            # Create reconstructed PDF
             base_name = os.path.splitext(os.path.basename(input_path))[0]
             pdf_path = os.path.join(self.output_dir, f"{base_name}_reconstructed.pdf")
+            
+            print(f"📄 Creating reconstructed PDF: {os.path.basename(pdf_path)}")
 
-            c = None  # Canvas will be created on the first page
+            c = None
 
             for i, page_result in enumerate(ocr_data):
                 rec_texts = page_result["rec_texts"]
                 rec_polys = page_result["rec_polys"]
 
                 if not rec_polys:
+                    print(f"⚠️ No text found on page {i+1}")
                     continue
 
                 # Use original image dimensions for PDF size
@@ -213,56 +255,82 @@ class NekkantiOCR:
                     c.setPageSize((img_width, img_height))
 
                 # Detect and draw lines (use appropriate image for line detection)
-                if self._is_pdf(input_path) and i < len(temp_image_paths):
-                    horizontal, vertical, table_mask = self.detect_table_lines(temp_image_paths[i])
-                else:
-                    horizontal, vertical, table_mask = self.detect_table_lines(input_path)
-                    
-                self.draw_table_lines_in_pdf(c, horizontal, vertical, table_mask, img_height)
+                try:
+                    if self._is_pdf(input_path) and i < len(temp_image_paths):
+                        horizontal, vertical, table_mask = self.detect_table_lines(temp_image_paths[i])
+                    else:
+                        horizontal, vertical, table_mask = self.detect_table_lines(input_path)
+                        
+                    self.draw_table_lines_in_pdf(c, horizontal, vertical, table_mask, img_height)
+                except Exception as line_error:
+                    print(f"⚠️ Warning: Could not detect lines for page {i+1}: {line_error}")
 
                 def invert_y(y):
                     return img_height - y
 
+                # Add text to PDF
+                text_count = 0
                 for text, poly in zip(rec_texts, rec_polys):
-                    x = min(p[0] for p in poly)
-                    y = min(p[1] for p in poly)
-                    y_pdf = invert_y(y)
-                    
-                    # Add horizontal offset (adjust this value as needed)
-                    horizontal_offset = 10  # pixels
-                    x = x + horizontal_offset
-                    
-                    # Calculate the bounding box dimensions
-                    height = max(abs(p[1] - poly[0][1]) for p in poly)
-                    width = max(abs(p[0] - poly[0][0]) for p in poly)
-                    
-                    # Calculate average character width (assuming average character is about 60% of height)
-                    avg_char_width = height * 0.6
-                    
-                    # Estimate number of characters that should fit in the width
-                    num_chars = max(1, width / avg_char_width)
-                    
-                    # Calculate font size based on height with a small margin
-                    height_based_size = int(height * 0.85)  # 85% of height to leave some margin
-                    
-                    # Calculate font size based on width and number of characters
-                    width_based_size = int(width / num_chars * 0.85)  # 85% of width per character
-                    
-                    # Use the minimum of both sizes to ensure text fits
-                    font_size = max(min(height_based_size, width_based_size), 6)
-                    
-                    # Set font and draw text
-                    c.setFont("Helvetica", font_size)
-                    c.drawString(x, y_pdf, text)
+                    try:
+                        x = min(p[0] for p in poly)
+                        y = min(p[1] for p in poly)
+                        y_pdf = invert_y(y)
+                        
+                        # Add horizontal offset (adjust this value as needed)
+                        horizontal_offset = 10  # pixels
+                        x = x + horizontal_offset
+                        
+                        # Calculate the bounding box dimensions
+                        height = max(abs(p[1] - poly[0][1]) for p in poly)
+                        width = max(abs(p[0] - poly[0][0]) for p in poly)
+                        
+                        # Calculate average character width (assuming average character is about 60% of height)
+                        avg_char_width = height * 0.6
+                        
+                        # Estimate number of characters that should fit in the width
+                        num_chars = max(1, width / avg_char_width)
+                        
+                        # Calculate font size based on height with a small margin
+                        height_based_size = int(height * 0.85)  # 85% of height to leave some margin
+                        
+                        # Calculate font size based on width and number of characters
+                        width_based_size = int(width / num_chars * 0.85)  # 85% of width per character
+                        
+                        # Use the minimum of both sizes to ensure text fits
+                        font_size = max(min(height_based_size, width_based_size), 6)
+                        
+                        # Set font and draw text
+                        c.setFont("Helvetica", font_size)
+                        c.drawString(x, y_pdf, text)
+                        text_count += 1
+                        
+                    except Exception as text_error:
+                        print(f"⚠️ Warning: Could not add text '{text}' to page {i+1}: {text_error}")
+                        continue
+                
+                print(f"📝 Added {text_count} text elements to page {i+1}")
 
             if c:
                 c.save()
+                print(f"✅ PDF reconstruction completed: {os.path.basename(pdf_path)}")
+                
+                # Verify the PDF was created
+                if not os.path.exists(pdf_path):
+                    raise RuntimeError(f"Reconstructed PDF was not created: {pdf_path}")
+                    
+            else:
+                raise RuntimeError("No pages were processed - could not create PDF")
 
             return ocr_data, pdf_path
+            
+        except Exception as e:
+            print(f"❌ Error in OCR and reconstruction: {e}")
+            raise
             
         finally:
             # Clean up temporary files
             if temp_image_paths:
+                print(f"🧹 Cleaning up {len(temp_image_paths)} temporary image files...")
                 self._cleanup_temp_files(temp_image_paths)
 
     def ocr(self, input_path):

@@ -29,7 +29,7 @@ class BankStatementHeaderExtractor:
     - Confidence scoring for optimal matches
     """
     
-    def __init__(self, output_dir="header_extraction_output", keywords_csv="bankstmt_allkeys.csv"):
+    def __init__(self, output_dir="header_extraction_output", keywords_csv="bankstmt_allkeys.csv", ifsc_master_csv="IFSC_master.csv"):
         """
         Initialize the header extractor.
         
@@ -49,6 +49,9 @@ class BankStatementHeaderExtractor:
         # Load keyword mappings - ONLY HEADER FIELDS
         self.keywords_df = self._load_keywords(keywords_csv)
         self.header_mappings = self._create_header_mappings()
+        
+        # Load IFSC master database
+        self.ifsc_master_df = self._load_ifsc_master(ifsc_master_csv)
         
         # Enhanced configuration for 90%+ accuracy
         self.y_tolerance = 12  # Reduced for more precise spatial matching
@@ -96,6 +99,121 @@ class BankStatementHeaderExtractor:
             print(f"   • {field_name}")
         
         return mappings
+    
+    def _load_ifsc_master(self, ifsc_csv_path: str) -> pd.DataFrame:
+        """Load IFSC master database for bank lookup."""
+        try:
+            if not os.path.exists(ifsc_csv_path):
+                print(f"⚠️ IFSC master CSV file not found: {ifsc_csv_path}")
+                return pd.DataFrame()
+            
+            print(f"📋 Loading IFSC master database from {ifsc_csv_path}")
+            df = pd.read_csv(ifsc_csv_path)
+            
+            # Clean up the data
+            df = df.dropna(subset=['IFSC'])  # Remove entries without IFSC
+            df['IFSC'] = df['IFSC'].str.upper().str.strip()  # Normalize IFSC codes
+            
+            # Create a lookup dictionary for faster access
+            self.ifsc_lookup = df.set_index('IFSC').to_dict('index')
+            
+            print(f"✅ Loaded {len(df)} IFSC entries from {len(df['BANK'].unique())} banks")
+            return df
+            
+        except Exception as e:
+            print(f"❌ Error loading IFSC master database: {e}")
+            return pd.DataFrame()
+    
+    def _lookup_bank_details_by_ifsc(self, ifsc_code: str) -> Dict[str, Any]:
+        """
+        Look up bank details using IFSC code.
+        
+        Args:
+            ifsc_code (str): IFSC code to lookup
+            
+        Returns:
+            Dict containing bank details or empty dict if not found
+        """
+        if not hasattr(self, 'ifsc_lookup') or not self.ifsc_lookup:
+            return {}
+            
+        ifsc_code = ifsc_code.upper().strip()
+        
+        if ifsc_code in self.ifsc_lookup:
+            bank_info = self.ifsc_lookup[ifsc_code]
+            
+            # Helper function to clean values and handle NaN
+            def clean_value(val):
+                if pd.isna(val) or val is None:
+                    return ''
+                val_str = str(val).strip()
+                if val_str.lower() == 'nan':
+                    return ''
+                return val_str
+            
+            return {
+                'Bank Name': clean_value(bank_info.get('BANK', '')),
+                'Bank Branch': clean_value(bank_info.get('BRANCH', '')),
+                'Bank Address': clean_value(bank_info.get('ADDRESS', '')),
+                'Bank City': clean_value(bank_info.get('CITY1', '')),
+                'Bank State': clean_value(bank_info.get('STATE', '')),
+                'Bank Phone': clean_value(bank_info.get('PHONE', ''))
+            }
+        
+        return {}
+    
+    def _enhance_headers_with_ifsc_lookup(self, headers: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Enhance extracted headers with IFSC-based bank lookup.
+        
+        Args:
+            headers (dict): Original extracted headers
+            
+        Returns:
+            Dict with enhanced headers including bank details
+        """
+        enhanced_headers = headers.copy()
+        
+        # Look for IFSC code in extracted headers
+        ifsc_code = None
+        ifsc_field_key = None
+        
+        for field_name, field_data in headers.items():
+            if field_name == 'IFSC Code' and field_data:
+                if isinstance(field_data, dict):
+                    ifsc_code = field_data.get('value', '')
+                else:
+                    ifsc_code = str(field_data)
+                ifsc_field_key = field_name
+                break
+        
+        if ifsc_code:
+            print(f"🔍 Looking up bank details for IFSC: {ifsc_code}")
+            bank_details = self._lookup_bank_details_by_ifsc(ifsc_code)
+            
+            if bank_details:
+                print(f"✅ Found bank details for {ifsc_code}:")
+                for key, value in bank_details.items():
+                    if value:  # Only add non-empty values
+                        enhanced_headers[key] = {
+                            'value': value,
+                            'key_text': ifsc_code,
+                            'keyword': 'IFSC lookup',
+                            'data_type': 'String',
+                            'field_type': 'Header',
+                            'method': 'ifsc_lookup',
+                            'distance': 0.0,
+                            'confidence': 0.99,  # High confidence for IFSC lookup
+                            'validation_score': 0.98,
+                            'spatial_score': 1.0
+                        }
+                        print(f"   • {key}: {value}")
+            else:
+                print(f"❌ No bank details found for IFSC: {ifsc_code}")
+        else:
+            print(f"ℹ️ No IFSC code found in headers - cannot perform bank lookup")
+        
+        return enhanced_headers
     
     def _get_text_and_positions(self, pdf_path: str) -> List[Tuple[str, List[List[float]], float]]:
         """Get text and positions from PDF using the most efficient method."""
@@ -261,20 +379,33 @@ class BankStatementHeaderExtractor:
                                 'text_index': text_idx
                             })
             
-            # Pattern 3: Enhanced account number patterns
+            # Pattern 3: Enhanced account number patterns with better detection
             account_patterns = [
-                # "Account No. XXXXXXXXXXX6582" or "A/C No. XXXXXXXXXXX6582"
-                (r'a/?c\s*no\.?\s*[:\s]*X+\d{3,8}', 'Account Number'),
+                # "Account No. XXXXXXXXXXX6582" - Fixed for case insensitive matching
+                (r'account\s+no\.?\s+[Xx]+\d{3,8}', 'Account Number'),
+                # "A/C No. XXXXXXXXXXX6582" or "A/C No XXXXXXXXXXX6582"  
+                (r'a/c\s+no\.?\s+[Xx]+\d{3,8}', 'Account Number'),
                 # "Account Number: 322205001059"
                 (r'account\s+number[:\s]+\d{8,20}', 'Account Number'),
+                # "Account No 6613041256" - Fixed for Kotak format
+                (r'account\s+no\.?\s+\d{8,20}', 'Account Number'),
                 # "A/C: 1234567890123456"
-                (r'a/?c[:\s]+\d{8,20}', 'Account Number'),
+                (r'a/c[:\s]+\d{8,20}', 'Account Number'),
                 # "Account: XXXXXXXXXXX6582"
-                (r'account[:\s]+X+\d{3,8}', 'Account Number'),
-                # "Detailed Statement for a/c no. XXXXXXXXXXX6582"
-                (r'detailed\s+statement\s+for\s+a/?c\s+no\.?\s*X+\d{3,8}', 'Account Number'),
+                (r'account[:\s]+[Xx]+\d{3,8}', 'Account Number'),
+                # "Detailed Statement for a/c no. XXXXXXXXXXX6582" - Fixed for Axis Bank
+                (r'detailed\s+statement\s+for\s+a/c\s+no\.\s+[Xx]+\d{3,8}', 'Account Number'),
+                # "Statement for a/c no. XXXXXXXXXXX6582" - Additional pattern
+                (r'statement\s+for\s+a/c\s+no\.\s+[Xx]+\d{3,8}', 'Account Number'),
                 # "Account Name: [Name] Account Number: [Number]"
                 (r'account\s+name:.*account\s+number[:\s]+\d{8,20}', 'Account Number'),
+                # "A/C No XXXXXXXXXXX6582" (without punctuation)
+                (r'a/c\s+no\s+[Xx]+\d{3,8}', 'Account Number'),
+                # "For Account Number: [Number]"
+                (r'for\s+account\s+number[:\s]+\d{8,20}', 'Account Number'),
+                # More flexible patterns as fallbacks
+                (r'account.*no.*[Xx]+\d{3,8}', 'Account Number'),
+                (r'a/c.*no.*[Xx]+\d{3,8}', 'Account Number'),
             ]
             
             for pattern, field_name in account_patterns:
@@ -291,7 +422,8 @@ class BankStatementHeaderExtractor:
                         'text_index': text_idx
                     })
             
-            # Pattern 4: Enhanced IFSC code patterns
+            # Pattern 4: Enhanced IFSC code patterns with contamination filtering
+            # Only match IFSC codes that are NOT in transaction context
             ifsc_patterns = [
                 # "IFSC CODE : IOBA0000384"
                 (r'ifsc\s*code\s*[:\s]*[A-Z]{4}\d{7}', 'IFSC Code'),
@@ -299,14 +431,37 @@ class BankStatementHeaderExtractor:
                 (r'ifsc[:\s]+[A-Z]{4}\d{7}', 'IFSC Code'),
                 # "RTGS/NEFT IFSC: HDFC0001628"
                 (r'rtgs/?neft\s*ifsc[:\s]*[A-Z]{4}\d{7}', 'IFSC Code'),
-                # Just the IFSC code standalone
-                (r'\b[A-Z]{4}\d{7}\b', 'IFSC Code'),
                 # "IFS Code: SBIN0016345"
                 (r'ifs\s*code[:\s]*[A-Z]{4}\d{7}', 'IFSC Code'),
+                # Standalone IFSC - but only if not in transaction context
+                (r'\b[A-Z]{4}\d{7}\b', 'IFSC Code'),
             ]
             
             for pattern, field_name in ifsc_patterns:
                 if re.search(pattern, text, re.IGNORECASE):
+                    # CRITICAL: Filter out transaction-related IFSC codes
+                    transaction_indicators = [
+                        'neft', 'rtgs', 'imps', 'upi', 'transfer', 'payment', 'transaction',
+                        'credit', 'debit', 'dr', 'cr', 'withdrawal', 'deposit',
+                        # Date patterns indicating transactions
+                        r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}',
+                        # Amount patterns
+                        r'[\d,]+\.\d{2}', r'rs\.?\s*[\d,]+', r'₹\s*[\d,]+'
+                    ]
+                    
+                    # Check if this text contains transaction indicators
+                    is_transaction_context = any(
+                        re.search(indicator, text_lower) for indicator in transaction_indicators
+                    )
+                    
+                    # Also check if it's a very long line (likely transaction)
+                    is_long_transaction_line = len(text) > 100
+                    
+                    # Skip if it looks like a transaction
+                    if is_transaction_context or is_long_transaction_line:
+                        # print(f"   🚫 Skipping transaction IFSC: '{text[:50]}...'")
+                        continue
+                    
                     key_matches.append({
                         'field_name': field_name,
                         'matched_text': text,
@@ -329,6 +484,8 @@ class BankStatementHeaderExtractor:
                 (r'home\s+branch[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
                 # "BRN -Branch: [Name]" (like in Axis)
                 (r'brn\s*-?\s*branch[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
+                # "Account Branch : [Name]" (like in HDFC)
+                (r'account\s+branch[:\s]+[A-Za-z\s\-&]{3,30}', 'Bank Branch'),
             ]
             
             for pattern, field_name in branch_patterns:
@@ -345,20 +502,43 @@ class BankStatementHeaderExtractor:
                         'text_index': text_idx
                     })
                 
-            # Pattern 6: Enhanced balance patterns
+            # Pattern 6: Enhanced balance patterns with better detection
             balance_patterns = [
-                # "Opening Balance: 12345.67"
+                # Exact balance labels with amounts
                 (r'opening\s+balance[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
-                # "Closing Balance: 12345.67"
                 (r'closing\s+balance[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
-                # "Opening Bal: 12345.67"
                 (r'opening\s+bal[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
-                # "Closing Bal: 12345.67"
                 (r'closing\s+bal[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
-                # "Balance B/F: 12345.67"
+                
+                # Balance forward/carried forward formats
                 (r'balance\s+b/?f[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
-                # "Balance C/F: 12345.67"
                 (r'balance\s+c/?f[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                (r'bal\.?\s+b/?f[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                (r'bal\.?\s+c/?f[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                
+                # Short formats
+                (r'^opening[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                (r'^closing[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                
+                # Just the label (value may be in adjacent text element)
+                (r'opening\s+balance[:\s]*$', 'Opening Balance'),
+                (r'closing\s+balance[:\s]*$', 'Closing Balance'),
+                (r'opening\s+bal[:\s]*$', 'Opening Balance'),
+                (r'closing\s+bal[:\s]*$', 'Closing Balance'),
+                
+                # Alternative formats
+                (r'balance\s+at\s+beginning[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                (r'balance\s+at\s+end[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                (r'previous\s+balance[:\s]+[\d,]+\.?\d*', 'Opening Balance'),
+                (r'current\s+balance[:\s]+[\d,]+\.?\d*', 'Closing Balance'),
+                
+                # Indian banking formats
+                (r'प्रारंभिक\s+शेष[:\s]+[\d,]+\.?\d*', 'Opening Balance'),  # Hindi
+                (r'अंतिम\s+शेष[:\s]+[\d,]+\.?\d*', 'Closing Balance'),    # Hindi
+                
+                # Summary formats
+                (r'total\s+credit[:\s]+[\d,]+\.?\d*', 'Total Credit'),
+                (r'total\s+debit[:\s]+[\d,]+\.?\d*', 'Total Debit'),
             ]
             
             for pattern, field_name in balance_patterns:
@@ -556,42 +736,55 @@ class BankStatementHeaderExtractor:
         # Account number extraction
         elif field_name == 'Account Number':
             if 'account pattern' in keyword:
-                # Enhanced account number extraction
-                patterns = [
-                    # Masked account numbers
-                    (r'X+\d{3,8}', 0.95),
-                    # Pure numeric account numbers
-                    (r'\d{8,20}', 0.9),
-                    # Account numbers in specific contexts
+                # Enhanced account number extraction with priority order
+                extraction_patterns = [
+                    # Masked account numbers (highest priority) - handle both cases
+                    (r'[Xx]+\d{3,8}', 0.95),
+                    # Account numbers in specific contexts with capture groups
                     (r'account\s+number[:\s]+(\d{8,20})', 0.95),
+                    (r'account\s+no\.?\s+(\d{8,20})', 0.95),  # Fixed for Kotak format
                     (r'a/?c\s*no\.?\s*[:\s]*(\d{8,20})', 0.9),
                     (r'a/?c[:\s]+(\d{8,20})', 0.85),
+                    (r'for\s+account\s+number[:\s]+(\d{8,20})', 0.9),
+                    # Detailed statement patterns (for Axis Bank) - handle both cases
+                    (r'detailed\s+statement\s+for\s+a/?c\s+no\.?\s*([Xx]+\d{3,8})', 0.95),
+                    (r'statement\s+for\s+a/?c\s+no\.?\s*([Xx]+\d{3,8})', 0.95),
+                    (r'a/?c\s+no\s+([Xx]+\d{3,8})', 0.9),
+                    # Account patterns - handle both cases  
+                    (r'account\s+no\.?\s+([Xx]+\d{3,8})', 0.95),
+                    # Pure numeric account numbers (lower priority)
+                    (r'\d{8,20}', 0.8),
                 ]
                 
-                for pattern, confidence in patterns:
-                    if 'account\s+number[:\s]+' in pattern or 'a/?c' in pattern:
-                        # Extract from capture group
-                        match = re.search(pattern, text, re.IGNORECASE)
-                        if match and match.groups():
+                for pattern, confidence in extraction_patterns:
+                    # Search in lowercase but extract from original text to preserve case
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        if match.groups():
+                            # Extract from capture group
                             extracted = match.group(1)
-                            # print(f"         Extracted Account Number (group): '{extracted}'")
-                            return extracted
-                    else:
-                        # Direct match
-                        match = re.search(pattern, text)
-                        if match:
+                        else:
+                            # Direct match
                             extracted = match.group()
+                        
+                        # Convert lowercase x back to uppercase X for display
+                        if 'x' in extracted.lower() and extracted.lower().startswith('x'):
+                            extracted = extracted.upper()
+                        
+                        # Enhanced validation - reject if it contains invalid terms
+                        invalid_terms = ['account', 'number', 'status', 'type', 'name', 'holder', 'product', 'service']
+                        if not any(term in extracted.lower() for term in invalid_terms):
                             # Validate it's not part of a longer invalid string
-                            if not any(invalid in extracted.lower() for invalid in ['account', 'number', 'status', 'type']):
-                                # print(f"         Extracted Account Number (direct): '{extracted}'")
+                            if len(extracted.split()) <= 2:  # Account numbers shouldn't be phrases
+                                # print(f"         Extracted Account Number: '{extracted}' (pattern: {pattern})")
                                 return extracted
                                 
             # Legacy support
             elif 'account number pattern' in keyword:
-                # Extract masked account number like "XXXXXXXXXXX6582"
-                acc_match = re.search(r'X+\d{3,8}', text)
+                # Extract masked account number like "XXXXXXXXXXX6582" - handle both cases
+                acc_match = re.search(r'[Xx]+\d{3,8}', text, re.IGNORECASE)
                 if acc_match:
-                    extracted = acc_match.group()
+                    extracted = acc_match.group().upper()  # Convert to uppercase
                     return extracted
                 # Extract actual account number
                 elif re.search(r'account\s+number[:\s]+(\d{8,18})', text, re.IGNORECASE):
@@ -662,29 +855,49 @@ class BankStatementHeaderExtractor:
                         
         # Balance extraction
         elif field_name in ['Opening Balance', 'Closing Balance'] and 'balance pattern' in keyword:
-            # Enhanced balance extraction
+            # Enhanced balance extraction with multiple strategies
             patterns = [
-                # With currency symbols
+                # Direct amount patterns
                 r'[\d,]+\.\d{2}',  # 12,345.67
-                r'[\d,]+',         # 12,345
-                r'[\d.]+',         # 12345.67
+                r'[\d,]+\.?\d*',   # 12,345 or 12345.67
+                r'₹\s*[\d,]+\.?\d*',  # ₹12,345.67
+                r'rs\.?\s*[\d,]+\.?\d*',  # Rs. 12,345.67
+                # Amount at end of text
+                r'[\d,]+\.?\d*\s*$',
+                # Amount after colon or space
+                r'[:\s]+[\d,]+\.?\d*',
             ]
+            
+            extracted_amount = None
             
             for pattern in patterns:
                 balance_match = re.search(pattern, text)
                 if balance_match:
-                    extracted = balance_match.group()
+                    candidate_amount = balance_match.group()
                     # Clean up the extracted value
-                    extracted = extracted.replace(',', '')  # Remove thousands separators
-                    try:
-                        # Validate it's a reasonable number
-                        amount = float(extracted)
-                        if 0.01 <= amount <= 999999999:  # Reasonable range
-                            # print(f"         Extracted Balance: '{extracted}'")
-                            return extracted
-                    except ValueError:
-                        continue
-                        
+                    candidate_amount = re.sub(r'[^\d.,]', '', candidate_amount)  # Remove non-numeric chars
+                    candidate_amount = candidate_amount.replace(',', '')  # Remove thousands separators
+                    
+                    if candidate_amount and candidate_amount != '.':
+                        try:
+                            # Validate it's a reasonable number
+                            amount = float(candidate_amount)
+                            if 0.01 <= amount <= 999999999:  # Reasonable range
+                                extracted_amount = candidate_amount
+                                break
+                        except ValueError:
+                            continue
+            
+            if extracted_amount:
+                # print(f"         Extracted Balance: '{extracted_amount}'")
+                return extracted_amount
+            
+            # If no amount found in same text, it might be a label-only match
+            # In this case, let spatial matching handle finding the nearby value
+            if re.search(r'(opening|closing|balance)\s*(balance|bal)?[:\s]*$', text.lower()):
+                # This is likely a label-only match, let spatial matching handle it
+                return None
+            
         # Fallback for any unhandled patterns
         if ('pattern' in keyword and keyword != 'IFSC pattern'):
             # Try to extract the most relevant part based on field type
@@ -1128,13 +1341,13 @@ class BankStatementHeaderExtractor:
             should_keep = True
             rejection_reason = None
             
-            # Quality Gate 1: Minimum confidence threshold
-            if confidence < self.min_confidence_score:
+            # Quality Gate 1: Minimum confidence threshold (but keep empty fields)
+            if confidence < self.min_confidence_score and method != 'not_found':
                 should_keep = False
                 rejection_reason = f"confidence {confidence:.2f} below threshold {self.min_confidence_score}"
                 
-            # Quality Gate 2: Field-specific validation
-            elif field_name == 'Account Number':
+            # Quality Gate 2: Field-specific validation (skip empty fields)
+            elif field_name == 'Account Number' and value.strip():
                 # Account numbers must be meaningful
                 if (len(value) < 6 or 
                     value.lower() in ['account', 'number', 'status', 'type', 'name', 'holder'] or
@@ -1143,7 +1356,7 @@ class BankStatementHeaderExtractor:
                     should_keep = False
                     rejection_reason = "invalid account number format"
                     
-            elif field_name == 'IFSC Code':
+            elif field_name == 'IFSC Code' and value.strip():
                 # IFSC codes must be exact format
                 clean_ifsc = value.upper().replace(' ', '').replace(':', '').replace('-', '')
                 if not re.match(r'^[A-Z]{4}\d{7}$', clean_ifsc):
@@ -1153,7 +1366,7 @@ class BankStatementHeaderExtractor:
                     # Update with cleaned version
                     field_data['value'] = clean_ifsc
                     
-            elif field_name == 'Bank Branch':
+            elif field_name == 'Bank Branch' and value.strip():
                 # Branch names should be reasonable
                 if (len(value) < 3 or len(value) > 50 or
                     value.lower() in ['branch', 'code', 'phone', 'email', 'currency', 'inr'] or
@@ -1161,7 +1374,7 @@ class BankStatementHeaderExtractor:
                     should_keep = False
                     rejection_reason = "invalid branch name"
                     
-            elif field_name in ['Statement Date', 'Statement Date From', 'Statement Date To']:
+            elif field_name in ['Statement Date', 'Statement Date From', 'Statement Date To'] and value.strip():
                 # Dates should be proper format
                 if not re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', value):
                     should_keep = False
@@ -1175,7 +1388,7 @@ class BankStatementHeaderExtractor:
                             should_keep = False
                             rejection_reason = f"unreasonable year {year}"
                             
-            elif field_name in ['Opening Balance', 'Closing Balance']:
+            elif field_name in ['Opening Balance', 'Closing Balance'] and value.strip():
                 # Balances should be reasonable numbers
                 try:
                     # Clean and validate amount
@@ -1192,10 +1405,27 @@ class BankStatementHeaderExtractor:
                     should_keep = False
                     rejection_reason = "cannot parse as number"
             
+            elif field_name in ['Bank Name', 'Bank Branch', 'Bank Address', 'Bank City', 'Bank State', 'Bank Phone']:
+                # IFSC-derived fields should be kept as-is (high confidence from lookup)
+                if method == 'ifsc_lookup' and value.strip():
+                    # Handle NaN values from IFSC database
+                    if pd.isna(value) or str(value).lower() == 'nan':
+                        should_keep = False
+                        rejection_reason = "NaN value from IFSC database"
+                    elif len(str(value).strip()) >= 2:
+                        should_keep = True
+                    else:
+                        should_keep = False
+                        rejection_reason = "value too short"
+                elif value.strip() and len(str(value).strip()) < 2:
+                    should_keep = False
+                    rejection_reason = "value too short"
+            
             # Quality Gate 3: Penalize spatial matches with low confidence when smart patterns available
             if (method in ['right_aligned', 'bottom_aligned', 'left_aligned'] and 
                 confidence < 0.8 and
-                field_name in ['IFSC Code', 'Account Number']):  # These should use smart patterns
+                field_name in ['IFSC Code', 'Account Number'] and
+                value.strip()):  # These should use smart patterns
                 should_keep = False
                 rejection_reason = "low confidence spatial match for pattern-detectable field"
             
@@ -1237,9 +1467,12 @@ class BankStatementHeaderExtractor:
                 print("❌ No header key matches found")
                 return {}
             
-            # Extract key-value pairs
-            extracted_headers = {}
+            # Start with standard template (all fields with empty values)
+            standard_headers = self._get_standard_header_template()
+            
+            # Extract key-value pairs and update template
             used_values = set()
+            found_fields = []
             
             # Sort by match score and field importance
             key_matches.sort(key=lambda x: (-x['match_score'], x['field_name']))
@@ -1248,14 +1481,15 @@ class BankStatementHeaderExtractor:
                 field_name = key_match['field_name']
                 
                 # Skip if we already found this field
-                if field_name in extracted_headers:
+                if field_name in found_fields:
                     continue
                 
                 # Find best value for this key
                 best_value = self._find_best_value_for_key(key_match, text_results, used_values)
                 
                 if best_value:
-                    extracted_headers[field_name] = {
+                    # Update the template with found values
+                    standard_headers[field_name] = {
                         'value': best_value['text'],
                         'key_text': key_match['matched_text'],
                         'keyword': key_match['keyword'],
@@ -1268,22 +1502,73 @@ class BankStatementHeaderExtractor:
                         'spatial_score': best_value['spatial_score']
                     }
                     used_values.add(best_value['index'])
+                    found_fields.append(field_name)
                     
                     # print(f"✅ {field_name}: '{best_value['text']}' (score: {best_value['final_score']:.2f}, method: {best_value['method']})")
                 # else:
                 #     print(f"⚠️ No valid value found for {field_name}")
             
-            # Save results
+            print(f"📊 Extracted initial header fields: {', '.join(found_fields)} (+ {len(standard_headers) - len(found_fields)} empty fields)")
+            
+            # Apply regex-based fallback for missing Account Number
+            if not standard_headers['Account Number']['value'].strip():
+                print("🔄 Account Number not found with keywords, trying regex fallback...")
+                regex_account = self._find_account_number_with_regex(text_results)
+                
+                if regex_account:
+                    standard_headers['Account Number'] = {
+                        'value': regex_account['text'],
+                        'key_text': regex_account['original_text'],
+                        'keyword': 'regex pattern ^\d{9,18}$',
+                        'data_type': 'String',
+                        'field_type': 'Header',
+                        'method': regex_account['method'],
+                        'distance': regex_account['distance'],
+                        'confidence': regex_account['final_score'],
+                        'validation_score': regex_account['validation_score'],
+                        'spatial_score': regex_account['spatial_score']
+                    }
+                    found_fields.append('Account Number')
+                    print(f"   ✅ Account Number found with regex: {regex_account['text']}")
+                else:
+                    print("   ❌ No account number found with regex pattern, trying label proximity...")
+                    
+                    # Third fallback: Look near account labels
+                    label_account = self._find_account_number_near_labels(text_results)
+                    
+                    if label_account:
+                        standard_headers['Account Number'] = {
+                            'value': label_account['text'],
+                            'key_text': label_account['label_text'],
+                            'keyword': f'near label: {label_account["label_text"]}',
+                            'data_type': 'String',
+                            'field_type': 'Header',
+                            'method': label_account['method'],
+                            'distance': label_account['distance'],
+                            'confidence': label_account['final_score'],
+                            'validation_score': label_account['validation_score'],
+                            'spatial_score': label_account['spatial_score']
+                        }
+                        found_fields.append('Account Number')
+                        print(f"   ✅ Account Number found near label: {label_account['text']}")
+                    else:
+                        print("   ❌ No account number found with any method")
+            
+            # Enhance headers with IFSC lookup before post-processing
+            enhanced_headers = self._enhance_headers_with_ifsc_lookup(standard_headers)
+            final_headers = self._post_process_headers(enhanced_headers)
+            
+            # Save final results with IFSC-enhanced data
             base_name = os.path.splitext(os.path.basename(pdf_path))[0]
             output_file = os.path.join(self.output_dir, f"{base_name}_headers.json")
             
             with open(output_file, 'w') as f:
-                json.dump(extracted_headers, f, indent=2)
+                json.dump(final_headers, f, indent=2)
             
-            print(f"💾 Saved {len(extracted_headers)} headers to: {output_file}")
-            print(f"📊 Extracted header fields: {', '.join(extracted_headers.keys())}")
+            print(f"💾 Saved {len(final_headers)} final headers to: {output_file}")
+            print(f"📊 Final header fields: {', '.join(final_headers.keys())}")
             
-            return self._post_process_headers(extracted_headers)
+            return final_headers
             
         except Exception as e:
             print(f"❌ Error extracting headers: {str(e)}")
@@ -1318,6 +1603,394 @@ class BankStatementHeaderExtractor:
                 results[os.path.basename(pdf_file)] = {}
         
         return results
+    
+    def _get_standard_header_template(self) -> Dict[str, Any]:
+        """
+        Get a template with all possible header fields, initialized to empty values.
+        This ensures consistent output structure regardless of what's found.
+        """
+        return {
+            # Core header fields from extraction
+            'Statement Date': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'Date',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Statement Date From': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'Date',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Statement Date To': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'Date',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Opening Balance': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'Double',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Closing Balance': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'Double',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Account Number': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'IFSC Code': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Bank Branch': {
+                'value': '',
+                'key_text': '',
+                'keyword': '',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            # IFSC-derived fields (populated via lookup)
+            'Bank Name': {
+                'value': '',
+                'key_text': '',
+                'keyword': 'IFSC lookup',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Bank Address': {
+                'value': '',
+                'key_text': '',
+                'keyword': 'IFSC lookup',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Bank City': {
+                'value': '',
+                'key_text': '',
+                'keyword': 'IFSC lookup',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Bank State': {
+                'value': '',
+                'key_text': '',
+                'keyword': 'IFSC lookup',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            },
+            'Bank Phone': {
+                'value': '',
+                'key_text': '',
+                'keyword': 'IFSC lookup',
+                'data_type': 'String',
+                'field_type': 'Header',
+                'method': 'not_found',
+                'distance': 0.0,
+                'confidence': 0.0,
+                'validation_score': 0.0,
+                'spatial_score': 0.0
+            }
+        }
+    
+    def _find_account_number_with_regex(self, text_results: List[Tuple]) -> Optional[Dict]:
+        """
+        Find account number using regex pattern as fallback when keyword approach fails.
+        
+        General Rules for Indian Bank Account Numbers:
+        - Length: Usually between 9 to 18 digits
+        - Digits only: Account numbers are numeric only (no letters)
+        - No special characters, spaces, or letters
+        - Pattern: ^\d{9,18}$
+        
+        Args:
+            text_results: List of (text, bbox, confidence) tuples
+            
+        Returns:
+            Dict with account number info or None if not found
+        """
+        print("🔍 Trying regex-based account number detection as fallback...")
+        
+        # Pattern for account numbers: 9-18 digits only
+        account_pattern = r'^\d{9,18}$'
+        
+        potential_accounts = []
+        
+        for text_idx, (text, bbox, confidence) in enumerate(text_results):
+            # Clean the text - remove common separators that might be in account numbers
+            cleaned_text = re.sub(r'[\s\-\.]', '', text.strip())
+            
+            # Check if it matches the account number pattern
+            if re.match(account_pattern, cleaned_text):
+                # Use the enhanced validation function
+                if self._is_valid_account_number(cleaned_text, text, text_results, text_idx, near_account_label=False):
+                    # Calculate a confidence score based on length and position
+                    length_score = 0.8 if 12 <= len(cleaned_text) <= 16 else 0.6  # Optimal length range
+                    
+                    potential_accounts.append({
+                        'text': cleaned_text,
+                        'original_text': text,
+                        'bbox': bbox,
+                        'confidence': confidence,
+                        'method': 'regex_pattern',
+                        'distance': 0.0,
+                        'spatial_score': 1.0,
+                        'validation_score': length_score,
+                        'final_score': length_score * 0.7 + confidence * 0.3,  # Weighted score
+                        'index': text_idx,
+                        'length': len(cleaned_text)
+                    })
+        
+        if not potential_accounts:
+            print("   ❌ No account numbers found with regex pattern")
+            return None
+        
+        # Sort by confidence and length preference (12-16 digits are most common)
+        potential_accounts.sort(key=lambda x: (-x['final_score'], -x['length']))
+        
+        best_account = potential_accounts[0]
+        print(f"   ✅ Found account number with regex: '{best_account['text']}' (confidence: {best_account['final_score']:.2f})")
+        
+        return best_account
+    
+    def _find_account_number_near_labels(self, text_results: List[Tuple]) -> Optional[Dict]:
+        """
+        Enhanced account number detection that looks for numbers near account-related labels.
+        Handles edge cases where account labels exist but numbers are not immediately adjacent.
+        
+        Args:
+            text_results: List of (text, bbox, confidence) tuples
+            
+        Returns:
+            Dict with account number info or None if not found
+        """
+        print("🔍 Trying enhanced account detection near labels...")
+        
+        # Account-related labels to look for
+        account_labels = [
+            'account number', 'account no', 'a/c no', 'a/c number', 'account', 'a/c',
+            'account details', 'customer account', 'saving account', 'savings account'
+        ]
+        
+        potential_accounts = []
+        
+        # Find text elements that contain account labels
+        for text_idx, (text, bbox, confidence) in enumerate(text_results):
+            text_lower = text.lower().strip()
+            
+            # Check if this text contains an account label
+            for label in account_labels:
+                if label in text_lower:
+                    print(f"   📍 Found account label: '{text}' at index {text_idx}")
+                    
+                    # Look for numbers in this text and surrounding text (next 5 elements)
+                    search_range = range(text_idx, min(len(text_results), text_idx + 6))
+                    
+                    for search_idx in search_range:
+                        search_text, search_bbox, search_confidence = text_results[search_idx]
+                        
+                        # Check for fragmented account numbers (digits with spaces)
+                        # Pattern like "54440 17044 80" - digits separated by spaces
+                        if re.match(r'^[\d\s]+$', search_text.strip()) and len(search_text.strip()) > 8:
+                            # Remove spaces and check if it's a valid account number length
+                            cleaned_number = re.sub(r'\s+', '', search_text.strip())
+                            if len(cleaned_number) >= 9 and len(cleaned_number) <= 18:
+                                # Apply validation
+                                if self._is_valid_account_number(cleaned_number, search_text, text_results, search_idx, near_account_label=True):
+                                    distance_from_label = search_idx - text_idx
+                                    confidence_score = max(0.5, 0.9 - (distance_from_label * 0.1))
+                                    
+                                    potential_accounts.append({
+                                        'text': cleaned_number,
+                                        'original_text': search_text,
+                                        'label_text': text,
+                                        'bbox': search_bbox,
+                                        'confidence': search_confidence,
+                                        'method': 'label_proximity',
+                                        'distance': 0.0,
+                                        'spatial_score': 1.0,
+                                        'validation_score': confidence_score,
+                                        'final_score': confidence_score * 0.8 + search_confidence * 0.2,
+                                        'index': search_idx,
+                                        'distance_from_label': distance_from_label
+                                    })
+                                    
+                                    print(f"      ✅ Found fragmented account near label: '{cleaned_number}' from '{search_text}' (distance: {distance_from_label})")
+                        
+                        # Also check for solid account numbers (original logic)
+                        numbers = re.findall(r'\d{8,18}', search_text)
+                        
+                        for number in numbers:
+                            # Apply the same validation as regex approach
+                            if self._is_valid_account_number(number, search_text, text_results, search_idx, near_account_label=True):
+                                distance_from_label = search_idx - text_idx
+                                confidence_score = max(0.5, 0.9 - (distance_from_label * 0.1))
+                                
+                                potential_accounts.append({
+                                    'text': number,
+                                    'original_text': search_text,
+                                    'label_text': text,
+                                    'bbox': search_bbox,
+                                    'confidence': search_confidence,
+                                    'method': 'label_proximity',
+                                    'distance': 0.0,
+                                    'spatial_score': 1.0,
+                                    'validation_score': confidence_score,
+                                    'final_score': confidence_score * 0.8 + search_confidence * 0.2,
+                                    'index': search_idx,
+                                    'distance_from_label': distance_from_label
+                                })
+                                
+                                print(f"      ✅ Found potential account near label: '{number}' (distance: {distance_from_label})")
+                    
+                    break  # Found a label in this text, no need to check other labels
+        
+        if not potential_accounts:
+            print("   ❌ No account numbers found near labels")
+            return None
+        
+        # Sort by confidence and proximity to label
+        potential_accounts.sort(key=lambda x: (-x['final_score'], x['distance_from_label']))
+        
+        best_account = potential_accounts[0]
+        print(f"   ✅ Best account near label: '{best_account['text']}' (score: {best_account['final_score']:.2f})")
+        
+        return best_account
+    
+    def _is_valid_account_number(self, number: str, context_text: str, text_results: List[Tuple], text_idx: int, near_account_label: bool = False) -> bool:
+        """
+        Enhanced validation for account numbers with context awareness.
+        
+        Args:
+            number (str): The number to validate
+            context_text (str): The text containing the number
+            text_results: Full list of text results for context analysis
+            text_idx (int): Index of the current text in text_results
+            
+        Returns:
+            bool: Whether the number is likely a valid account number
+        """
+        # Basic length check
+        if len(number) < 9 or len(number) > 18:
+            return False
+        
+        # Skip very short numbers for account detection
+        if len(number) < 10:
+            return False
+        
+        # Skip very long numbers (likely transaction IDs)
+        if len(number) > 16:
+            return False
+        
+        # Skip if it's likely a phone number (10 digits starting with 6-9, but be lenient if near account label)
+        if not near_account_label and len(number) == 10 and number.startswith(('9', '8', '7', '6')):
+            return False
+        
+        # Skip if it's likely a date
+        if len(number) == 8 and (number.startswith(('19', '20')) or number[2:4] in ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']):
+            return False
+        
+        # Get surrounding context for better validation
+        surrounding_context = ' '.join([
+            text_results[max(0, text_idx-2)][0] if text_idx >= 2 else '',
+            text_results[max(0, text_idx-1)][0] if text_idx >= 1 else '',
+            context_text,
+            text_results[min(len(text_results)-1, text_idx+1)][0] if text_idx < len(text_results)-1 else '',
+            text_results[min(len(text_results)-1, text_idx+2)][0] if text_idx < len(text_results)-2 else ''
+        ]).lower()
+        
+        # Skip if context suggests it's an amount (but be lenient if near account label)
+        amount_indicators = ['rs', 'inr', 'rupees', 'amount', 'balance', 'credit', 'debit', 'total', '₹', 'cr', 'dr']
+        if not near_account_label and any(indicator in surrounding_context for indicator in amount_indicators):
+            return False
+        
+        # Skip if it appears in a transaction-like context (but be lenient if near account label)
+        transaction_indicators = [
+            'transaction', 'txn', 'ref', 'reference', 'upi', 'imps', 'neft', 'rtgs',
+            'transfer', 'payment', 'withdrawal', 'deposit', '/ic', 'ltd/', 'bank/',
+            'yespay', 'paytm', 'bharatpe'
+        ]
+        if not near_account_label and any(indicator in surrounding_context for indicator in transaction_indicators):
+            return False
+        
+        return True
 
 
 # Example usage and testing
