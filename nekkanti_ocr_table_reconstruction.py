@@ -505,8 +505,8 @@ class NekkantiOCR:
 
     def _post_process_table(self, df):
         """
-        Post-process the DataFrame to merge single-cell rows with the previous row.
-        Based on the user's provided logic.
+        Enhanced post-processing to merge multiple consecutive rows that belong to the same logical row.
+        Handles cases like Canara Bank where a single transaction spans multiple rows.
         """
         if df.empty or len(df) < 2:
             return df
@@ -521,40 +521,66 @@ class NekkantiOCR:
         # Create a list to store rows to drop
         rows_to_drop = []
         
-        # Iterate over rows (starting from index 1)
-        for i in range(1, len(df)):
-            # Check if the row index exists before accessing
-            if i < len(df) and i not in rows_to_drop:
-                try:
+        # Enhanced logic to handle multiple consecutive rows belonging to same logical row
+        i = 1
+        while i < len(df):
+            # Skip if this row is already marked for deletion
+            if i in rows_to_drop:
+                i += 1
+                continue
+                
+            try:
                 # Count non-empty cells in the current row
-                    row_data = df.iloc[i].astype(str).str.strip()
-                    # Replace 'None', 'nan', empty strings with pd.NA
-                    row_data = row_data.replace(['None', 'nan', '', 'NaN'], pd.NA)
-                    non_empty = row_data.dropna()
+                row_data = df.iloc[i].astype(str).str.strip()
+                # Replace 'None', 'nan', empty strings with pd.NA
+                row_data = row_data.replace(['None', 'nan', '', 'NaN'], pd.NA)
+                non_empty = row_data.dropna()
                 
-                    # If only one cell is non-empty or two cells are non-empty
-                    if len(non_empty) == 1 or len(non_empty) == 2:
-                        col_idx = non_empty.index[0]  # Get the column where the data is
+                # If only one cell is non-empty or two cells are non-empty, it's a candidate for merging
+                if len(non_empty) == 1 or len(non_empty) == 2:
+                    # Find the target row to merge into (look backwards for the last complete row)
+                    target_row_idx = self._find_target_row_for_merge(df, i, rows_to_drop)
+                    
+                    if target_row_idx is not None:
+                        # Now collect all consecutive rows that should be merged into the target
+                        rows_to_merge = []
+                        j = i
                         
-                        # Only merge if the previous row exists and is not marked for deletion
-                        if (i-1) >= 0 and (i-1) not in rows_to_drop:
-                    # Merge the content into the above row
-                            prev_val = str(df.at[i-1, col_idx]) if pd.notna(df.at[i-1, col_idx]) else ""
-                            curr_val = str(df.at[i, col_idx]) if pd.notna(df.at[i, col_idx]) else ""
-                            
-                            # Only merge if current value is not empty
-                            if curr_val.strip():
-                                if prev_val.strip():
-                                    df.at[i-1, col_idx] = prev_val + " " + curr_val
-                                else:
-                                    df.at[i-1, col_idx] = curr_val
+                        # Continue collecting rows until we find a complete row or reach the end
+                        while j < len(df):
+                            if j in rows_to_drop:
+                                j += 1
+                                continue
                                 
-                    # Mark the current row for deletion
-                        rows_to_drop.append(i)
-                
-                except Exception as e:
-                    print(f"⚠️ Warning: Error processing row {i} in post-processing: {e}")
-                    continue
+                            curr_row_data = df.iloc[j].astype(str).str.strip()
+                            curr_row_data = curr_row_data.replace(['None', 'nan', '', 'NaN'], pd.NA)
+                            curr_non_empty = curr_row_data.dropna()
+                            
+                            # If this row has 1-2 non-empty cells, it's part of the continuation
+                            if len(curr_non_empty) == 1 or len(curr_non_empty) == 2:
+                                rows_to_merge.append(j)
+                                j += 1
+                            else:
+                                # This is a complete row, stop collecting
+                                break
+                        
+                        # Merge all collected rows into the target row
+                        for merge_idx in rows_to_merge:
+                            self._merge_row_into_target(df, merge_idx, target_row_idx)
+                            rows_to_drop.append(merge_idx)
+                        
+                        # Skip ahead to the next unprocessed row
+                        i = j
+                    else:
+                        i += 1
+                else:
+                    # This is a complete row, move to next
+                    i += 1
+                    
+            except Exception as e:
+                print(f"⚠️ Warning: Error processing row {i} in enhanced post-processing: {e}")
+                i += 1
+                continue
         
         # Drop the marked rows after the loop
         if rows_to_drop:
@@ -563,7 +589,162 @@ class NekkantiOCR:
         # Reset index after dropping rows
         df.reset_index(drop=True, inplace=True)
         
+        # Apply duplicate row detection and removal
+        df = self._remove_duplicate_partial_rows(df)
+        
         return df
+    
+    def _find_target_row_for_merge(self, df, current_idx, rows_to_drop):
+        """
+        Find the target row to merge continuation rows into.
+        Look backwards for the last complete row that hasn't been marked for deletion.
+        """
+        for target_idx in range(current_idx - 1, -1, -1):
+            if target_idx not in rows_to_drop:
+                # Check if this row is a complete row (has more than 2 non-empty cells)
+                row_data = df.iloc[target_idx].astype(str).str.strip()
+                row_data = row_data.replace(['None', 'nan', '', 'NaN'], pd.NA)
+                non_empty = row_data.dropna()
+                
+                # If this row has 3+ non-empty cells, it's likely a complete row
+                if len(non_empty) >= 3:
+                    return target_idx
+                # If it has 1-2 non-empty cells, continue looking backwards
+                elif len(non_empty) >= 1:
+                    continue
+                else:
+                    # Empty row, continue looking
+                    continue
+        
+        # If no suitable target found, try to use the immediate previous row
+        if current_idx > 0 and (current_idx - 1) not in rows_to_drop:
+            return current_idx - 1
+            
+        return None
+    
+    def _merge_row_into_target(self, df, source_idx, target_idx):
+        """
+        Merge a source row into a target row by appending text to the appropriate columns.
+        """
+        # Get non-empty cells from source row
+        source_row = df.iloc[source_idx].astype(str).str.strip()
+        source_row = source_row.replace(['None', 'nan', '', 'NaN'], pd.NA)
+        
+        for col_idx, value in enumerate(source_row):
+            if pd.notna(value) and str(value).strip():
+                # Get the current value in the target row
+                target_val = str(df.at[target_idx, df.columns[col_idx]]) if pd.notna(df.at[target_idx, df.columns[col_idx]]) else ""
+                source_val = str(value).strip()
+                
+                # Merge the content
+                if target_val.strip():
+                    df.at[target_idx, df.columns[col_idx]] = target_val + " " + source_val
+                else:
+                    df.at[target_idx, df.columns[col_idx]] = source_val
+    
+    def _remove_duplicate_partial_rows(self, df):
+        """
+        Remove duplicate partial rows where the same transaction appears multiple times
+        with different levels of completeness. Keep the row with more information.
+        """
+        if df.empty or len(df) < 2:
+            return df
+            
+        rows_to_remove = []
+        
+        # Compare consecutive rows to find partial duplicates
+        for i in range(len(df) - 1):
+            if i in rows_to_remove:
+                continue
+                
+            current_row = df.iloc[i].astype(str).str.strip()
+            next_row = df.iloc[i + 1].astype(str).str.strip()
+            
+            # Clean and normalize data for comparison
+            current_clean = current_row.replace(['None', 'nan', '', 'NaN'], pd.NA)
+            next_clean = next_row.replace(['None', 'nan', '', 'NaN'], pd.NA)
+            
+            current_non_empty = current_clean.dropna()
+            next_non_empty = next_clean.dropna()
+            
+            # Skip if either row is mostly empty
+            if len(current_non_empty) < 2 or len(next_non_empty) < 2:
+                continue
+            
+            # Check if rows are similar (potential duplicates)
+            similarity_score = self._calculate_row_similarity(current_clean, next_clean)
+            
+            # If similarity is high (>70%), consider them duplicates
+            if similarity_score > 0.7:
+                # Keep the row with more complete information
+                if len(current_non_empty) >= len(next_non_empty):
+                    # Current row has more or equal info, remove next row
+                    rows_to_remove.append(i + 1)
+                    print(f"   🗑️ Removing duplicate partial row {i+1} (less complete than row {i})")
+                else:
+                    # Next row has more info, remove current row
+                    rows_to_remove.append(i)
+                    print(f"   🗑️ Removing duplicate partial row {i} (less complete than row {i+1})")
+        
+        # Remove identified duplicate rows
+        if rows_to_remove:
+            df = df.drop(rows_to_remove).reset_index(drop=True)
+            print(f"   🧹 Removed {len(rows_to_remove)} duplicate partial row(s)")
+        
+        return df
+    
+    def _calculate_row_similarity(self, row1, row2):
+        """
+        Calculate similarity between two rows based on overlapping non-empty values.
+        Returns a score between 0 and 1 where 1 means identical content.
+        """
+        row1_values = set()
+        row2_values = set()
+        
+        # Collect non-empty values from both rows
+        for val in row1:
+            if pd.notna(val) and str(val).strip():
+                # Split multi-word values to catch partial matches
+                words = str(val).strip().split()
+                for word in words:
+                    if len(word) > 2:  # Skip very short words
+                        row1_values.add(word.lower())
+        
+        for val in row2:
+            if pd.notna(val) and str(val).strip():
+                words = str(val).strip().split()
+                for word in words:
+                    if len(word) > 2:
+                        row2_values.add(word.lower())
+        
+        if not row1_values or not row2_values:
+            return 0.0
+        
+        # Calculate Jaccard similarity (intersection over union)
+        intersection = len(row1_values.intersection(row2_values))
+        union = len(row1_values.union(row2_values))
+        
+        similarity = intersection / union if union > 0 else 0.0
+        
+        # Boost similarity if key financial patterns match (dates, amounts)
+        financial_patterns = ['/', '-', '.', ',']
+        row1_has_financial = any(pattern in str(val) for val in row1 for pattern in financial_patterns)
+        row2_has_financial = any(pattern in str(val) for val in row2 for pattern in financial_patterns)
+        
+        if row1_has_financial and row2_has_financial:
+            # Check for matching date or amount patterns
+            for val1 in row1:
+                if pd.notna(val1):
+                    val1_str = str(val1).strip()
+                    for val2 in row2:
+                        if pd.notna(val2):
+                            val2_str = str(val2).strip()
+                            # If we find exact matches in financial data, boost similarity
+                            if val1_str == val2_str and (len(val1_str) > 5):
+                                similarity += 0.2
+                                break
+        
+        return min(similarity, 1.0)  # Cap at 1.0
 
     def ocr_reconstruct_and_extract_tables(self, input_path, save_to_excel=True):
         """

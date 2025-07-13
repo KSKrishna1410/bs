@@ -147,10 +147,13 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    # Run the API server
+    # Run the API server with extended timeout settings
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=True,
+        timeout_keep_alive=120,  # Keep connections alive longer
+        limit_max_requests=1000,  # Handle more requests
+        workers=1  # Single worker to avoid resource conflicts
     ) 

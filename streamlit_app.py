@@ -139,8 +139,8 @@ def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any
             'doctype': 'BANKSTMT'
         }
         
-        with st.spinner('Processing file through OCR API...'):
-            response = requests.post(API_ENDPOINT, files=files, data=data, timeout=120)
+        with st.spinner('Processing file through OCR API... This may take several minutes for large or complex files.'):
+            response = requests.post(API_ENDPOINT, files=files, data=data, timeout=600)  # 10 minutes
         
         if response.status_code == 200:
             return response.json()
@@ -149,7 +149,12 @@ def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any
             return None
             
     except requests.exceptions.Timeout:
-        st.error("Request timed out. The file might be too large or complex.")
+        st.error("⏰ Request timed out after 10 minutes. The file might be too large or complex.")
+        st.info("💡 **Tips to resolve timeout issues:**")
+        st.info("• Try with a smaller file size")
+        st.info("• Use a PDF instead of an image if possible")
+        st.info("• Check if the file is corrupted")
+        st.info("• For very large files, consider splitting them into smaller parts")
         return None
     except requests.exceptions.ConnectionError:
         st.error("Could not connect to the API. Make sure the API server is running.")
@@ -360,11 +365,26 @@ def main():
     
     if uploaded_file is not None:
         # File info
+        file_size_kb = uploaded_file.size / 1024
+        file_size_mb = file_size_kb / 1024
+        
         file_details = {
             "Filename": uploaded_file.name,
-            "File Size": f"{uploaded_file.size / 1024:.2f} KB",
+            "File Size": f"{file_size_mb:.2f} MB" if file_size_mb > 1 else f"{file_size_kb:.2f} KB",
             "File Type": uploaded_file.type
         }
+        
+        # Warning for large files
+        if file_size_mb > 10:
+            st.warning("⚠️ **Large File Detected**")
+            st.warning(f"File size: {file_size_mb:.2f} MB")
+            st.warning("Large files may take longer to process and could timeout. Consider:")
+            st.warning("• Compressing the PDF")
+            st.warning("• Using a smaller resolution image")
+            st.warning("• Splitting large documents into smaller parts")
+        
+        elif file_size_mb > 5:
+            st.info(f"ℹ️ **Medium File Size**: {file_size_mb:.2f} MB - Processing may take 2-5 minutes")
         
         # Read file bytes for preview and processing
         file_bytes = uploaded_file.read()
