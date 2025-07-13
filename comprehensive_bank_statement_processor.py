@@ -96,10 +96,12 @@ class ComprehensiveBankStatementProcessor:
         
         for field_name, field_data in headers.items():
             value = field_data.get('value', '')
-            if value and value.strip():  # Only include non-empty values
+            # Convert value to string to handle both string and integer values (like Account Length)
+            value_str = str(value) if value is not None else ''
+            if value_str and value_str.strip():  # Only include non-empty values
                 header_info.append({
                     "key": field_name,
-                    "value": value,
+                    "value": value_str,
                     "key_bbox": [[0, 0], [100, 0], [100, 20], [0, 20]],  # Placeholder bbox
                     "value_bbox": [[0, 0], [100, 0], [100, 20], [0, 20]],  # Placeholder bbox
                     "method": field_data.get('method', 'extracted'),

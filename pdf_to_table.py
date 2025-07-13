@@ -242,6 +242,9 @@ class DocumentTableExtractor:
         # Apply duplicate row detection and removal
         df = self._remove_duplicate_partial_rows(df)
         
+        # Remove summary rows and truncate table at summary boundary
+        df = self._remove_summary_rows(df)
+        
         return df
     
     def _find_target_row_for_merge(self, df, current_idx, rows_to_drop):
@@ -521,11 +524,16 @@ class DocumentTableExtractor:
             if len(current_non_empty) < 2 or len(next_non_empty) < 2:
                 continue
             
+            # Check if rows have different financial data (dates, amounts) - don't remove if they differ
+            if self._have_different_financial_data(current_clean, next_clean):
+                continue
+            
             # Check if rows are similar (potential duplicates)
             similarity_score = self._calculate_row_similarity(current_clean, next_clean)
             
-            # If similarity is high (>70%), consider them duplicates
-            if similarity_score > 0.7:
+            # If similarity is very high (>85%), consider them duplicates
+            # Made more conservative to avoid removing legitimate rows  
+            if similarity_score > 0.85:
                 # Keep the row with more complete information
                 if len(current_non_empty) >= len(next_non_empty):
                     # Current row has more or equal info, remove next row
@@ -595,6 +603,109 @@ class DocumentTableExtractor:
                                 break
         
         return min(similarity, 1.0)  # Cap at 1.0
+    
+    def _have_different_financial_data(self, row1, row2):
+        """
+        Check if two rows have different financial data (dates, amounts).
+        If they differ significantly in financial data, they shouldn't be considered duplicates.
+        """
+        # Extract financial patterns from both rows
+        row1_financial = self._extract_financial_patterns(row1)
+        row2_financial = self._extract_financial_patterns(row2)
+        
+        # If either row has no financial data, can't compare
+        if not row1_financial or not row2_financial:
+            return False
+        
+        # Check for different dates
+        row1_dates = [item for item in row1_financial if self._looks_like_date(item)]
+        row2_dates = [item for item in row2_financial if self._looks_like_date(item)]
+        
+        if row1_dates and row2_dates:
+            # If dates are completely different, these are different transactions
+            if not any(d1 == d2 for d1 in row1_dates for d2 in row2_dates):
+                return True
+        
+        # Check for different amounts
+        row1_amounts = [item for item in row1_financial if self._looks_like_amount(item)]
+        row2_amounts = [item for item in row2_financial if self._looks_like_amount(item)]
+        
+        if row1_amounts and row2_amounts:
+            # If amounts are completely different, these are different transactions
+            if not any(a1 == a2 for a1 in row1_amounts for a2 in row2_amounts):
+                return True
+        
+        return False
+    
+    def _extract_financial_patterns(self, row):
+        """Extract potential financial data (dates, amounts) from a row."""
+        financial_items = []
+        for val in row:
+            if pd.notna(val) and str(val).strip():
+                val_str = str(val).strip()
+                # Look for date-like or amount-like patterns
+                if (self._looks_like_date(val_str) or self._looks_like_amount(val_str)):
+                    financial_items.append(val_str)
+        return financial_items
+    
+    def _looks_like_date(self, text):
+        """Check if text looks like a date."""
+        import re
+        date_patterns = [
+            r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}',  # DD-MM-YYYY or DD/MM/YYYY
+            r'\d{2,4}[-/]\d{1,2}[-/]\d{1,2}',  # YYYY-MM-DD
+            r'\d{1,2}-[A-Z]{3}-\d{2,4}',       # DD-MMM-YYYY
+        ]
+        return any(re.search(pattern, text) for pattern in date_patterns)
+    
+    def _looks_like_amount(self, text):
+        """Check if text looks like a financial amount."""
+        import re
+        # Look for numbers with decimals, commas, and currency indicators
+        amount_patterns = [
+            r'\d+\.\d{2}',              # 123.45
+            r'\d{1,3}(,\d{3})*\.\d{2}', # 1,234.56
+            r'\d+,\d{3}\.\d{2}',        # 1,234.56
+        ]
+        return any(re.search(pattern, text) for pattern in amount_patterns)
+    
+    def _remove_summary_rows(self, df):
+        """
+        Remove summary rows and truncate table at summary boundary.
+        Summary rows contain terms like 'closing balance', 'total', 'summary' etc.
+        """
+        if df.empty or len(df) <= 2:  # Keep tables with 2 or fewer rows
+            return df
+            
+        summary_keywords = [
+            'transaction total', 'total transaction', 'total dr/cr', 'dr/cr total',
+            'closing balance', 'final balance', 'end balance', 'net balance',
+            'balance forward', 'carried forward', 'brought forward',
+            'grand total', 'summary', 'statement summary'
+        ]
+        
+        # Start checking from row 2 onwards (skip potential header row)
+        # Only consider rows in the latter half of the table as potential summaries
+        start_index = max(2, len(df) - 5)  # Check last 5 rows or start from row 2
+        
+        for i in range(start_index, len(df)):
+            row_text = ' '.join(str(val).lower() for val in df.iloc[i] if pd.notna(val))
+            
+            # Check if this row contains summary keywords
+            is_summary = any(keyword in row_text for keyword in summary_keywords)
+            
+            # Additional check: Summary rows often have fewer unique values or repeated patterns
+            row_values = [str(val).strip() for val in df.iloc[i] if pd.notna(val) and str(val).strip()]
+            has_empty_cells = len(row_values) < (len(df.columns) * 0.6)  # More than 40% empty
+            
+            if is_summary and (has_empty_cells or len(set(row_values)) < 3):
+                print(f"   🔚 Found summary row at index {i}: '{row_text[:50]}...'")
+                print(f"   ✂️ Truncating table at summary boundary - removing {len(df) - i} row(s)")
+                # Return everything before the summary row
+                return df.iloc[:i].reset_index(drop=True)
+        
+        # If no summary row found, return the full table
+        return df
 
     def process_document(self, input_path):
         """

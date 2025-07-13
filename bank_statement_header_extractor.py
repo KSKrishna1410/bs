@@ -114,6 +114,29 @@ class BankStatementHeaderExtractor:
             df = df.dropna(subset=['IFSC'])  # Remove entries without IFSC
             df['IFSC'] = df['IFSC'].str.upper().str.strip()  # Normalize IFSC codes
             
+            # Handle the account length column - try both possible column names
+            account_length_col = None
+            if 'A/c Length (Min)' in df.columns:
+                account_length_col = 'A/c Length (Min)'
+            elif 'A/c Length (Min).1' in df.columns:
+                account_length_col = 'A/c Length (Min).1'
+            elif 'Account Length (Min)' in df.columns:
+                account_length_col = 'Account Length (Min)'
+            
+            # Clean up account length data if available
+            if account_length_col:
+                df[account_length_col] = pd.to_numeric(df[account_length_col], errors='coerce')
+                df[account_length_col] = df[account_length_col].fillna(0).astype(int)
+                print(f"✅ Found account length column: {account_length_col}")
+            else:
+                print("⚠️ No account length column found in IFSC master")
+                df['A/c Length (Min)'] = 0  # Default to 0 if not found
+                account_length_col = 'A/c Length (Min)'
+            
+            # Standardize column name
+            if account_length_col != 'A/c Length (Min)':
+                df['A/c Length (Min)'] = df[account_length_col]
+            
             # Create a lookup dictionary for faster access
             self.ifsc_lookup = df.set_index('IFSC').to_dict('index')
             
@@ -151,13 +174,21 @@ class BankStatementHeaderExtractor:
                     return ''
                 return val_str
             
+            # Get account length (ensure it's an integer)
+            account_length = bank_info.get('A/c Length (Min)', 0)
+            if pd.isna(account_length):
+                account_length = 0
+            else:
+                account_length = int(account_length)
+            
             return {
                 'Bank Name': clean_value(bank_info.get('BANK', '')),
                 'Bank Branch': clean_value(bank_info.get('BRANCH', '')),
                 'Bank Address': clean_value(bank_info.get('ADDRESS', '')),
                 'Bank City': clean_value(bank_info.get('CITY1', '')),
                 'Bank State': clean_value(bank_info.get('STATE', '')),
-                'Bank Phone': clean_value(bank_info.get('PHONE', ''))
+                'Bank Phone': clean_value(bank_info.get('PHONE', '')),
+                'Account Length': account_length  # Add account length to the returned info
             }
         
         return {}
@@ -1510,49 +1541,72 @@ class BankStatementHeaderExtractor:
             
             print(f"📊 Extracted initial header fields: {', '.join(found_fields)} (+ {len(standard_headers) - len(found_fields)} empty fields)")
             
-            # Apply regex-based fallback for missing Account Number
+            # Enhanced account number detection with IFSC-based length as primary method
             if not standard_headers['Account Number']['value'].strip():
-                print("🔄 Account Number not found with keywords, trying regex fallback...")
-                regex_account = self._find_account_number_with_regex(text_results)
+                print("🔄 Account Number not found with keywords, trying enhanced detection...")
                 
-                if regex_account:
+                # Primary method: IFSC-based length detection
+                ifsc_account = self._find_account_number_with_ifsc_length(text_results)
+                
+                if ifsc_account:
                     standard_headers['Account Number'] = {
-                        'value': regex_account['text'],
-                        'key_text': regex_account['original_text'],
-                        'keyword': 'regex pattern ^\d{9,18}$',
+                        'value': ifsc_account['text'],
+                        'key_text': ifsc_account['original_text'],
+                        'keyword': f'IFSC-based length detection (Bank: {ifsc_account.get("bank_name", "Unknown")})',
                         'data_type': 'String',
                         'field_type': 'Header',
-                        'method': regex_account['method'],
-                        'distance': regex_account['distance'],
-                        'confidence': regex_account['final_score'],
-                        'validation_score': regex_account['validation_score'],
-                        'spatial_score': regex_account['spatial_score']
+                        'method': ifsc_account['method'],
+                        'distance': ifsc_account['distance'],
+                        'confidence': ifsc_account['final_score'],
+                        'validation_score': ifsc_account['validation_score'],
+                        'spatial_score': ifsc_account['spatial_score']
                     }
                     found_fields.append('Account Number')
-                    print(f"   ✅ Account Number found with regex: {regex_account['text']}")
+                    print(f"   ✅ Account Number found with IFSC length: {ifsc_account['text']}")
                 else:
-                    print("   ❌ No account number found with regex pattern, trying label proximity...")
+                    print("   ❌ IFSC-based detection failed, trying regex fallback...")
                     
-                    # Third fallback: Look near account labels
-                    label_account = self._find_account_number_near_labels(text_results)
+                    # Second fallback: Regex-based detection
+                    regex_account = self._find_account_number_with_regex(text_results)
                     
-                    if label_account:
+                    if regex_account:
                         standard_headers['Account Number'] = {
-                            'value': label_account['text'],
-                            'key_text': label_account['label_text'],
-                            'keyword': f'near label: {label_account["label_text"]}',
+                            'value': regex_account['text'],
+                            'key_text': regex_account['original_text'],
+                            'keyword': 'regex pattern ^\d{9,18}$',
                             'data_type': 'String',
                             'field_type': 'Header',
-                            'method': label_account['method'],
-                            'distance': label_account['distance'],
-                            'confidence': label_account['final_score'],
-                            'validation_score': label_account['validation_score'],
-                            'spatial_score': label_account['spatial_score']
+                            'method': regex_account['method'],
+                            'distance': regex_account['distance'],
+                            'confidence': regex_account['final_score'],
+                            'validation_score': regex_account['validation_score'],
+                            'spatial_score': regex_account['spatial_score']
                         }
                         found_fields.append('Account Number')
-                        print(f"   ✅ Account Number found near label: {label_account['text']}")
+                        print(f"   ✅ Account Number found with regex: {regex_account['text']}")
                     else:
-                        print("   ❌ No account number found with any method")
+                        print("   ❌ No account number found with regex pattern, trying label proximity...")
+                        
+                        # Third fallback: Look near account labels
+                        label_account = self._find_account_number_near_labels(text_results)
+                        
+                        if label_account:
+                            standard_headers['Account Number'] = {
+                                'value': label_account['text'],
+                                'key_text': label_account['label_text'],
+                                'keyword': f'near label: {label_account["label_text"]}',
+                                'data_type': 'String',
+                                'field_type': 'Header',
+                                'method': label_account['method'],
+                                'distance': label_account['distance'],
+                                'confidence': label_account['final_score'],
+                                'validation_score': label_account['validation_score'],
+                                'spatial_score': label_account['spatial_score']
+                            }
+                            found_fields.append('Account Number')
+                            print(f"   ✅ Account Number found near label: {label_account['text']}")
+                        else:
+                            print("   ❌ No account number found with any method")
             
             # Enhance headers with IFSC lookup before post-processing
             enhanced_headers = self._enhance_headers_with_ifsc_lookup(standard_headers)
@@ -1991,6 +2045,160 @@ class BankStatementHeaderExtractor:
             return False
         
         return True
+    
+    def _find_account_number_with_ifsc_length(self, text_results: List[Tuple]) -> Optional[Dict]:
+        """
+        Enhanced account number detection using IFSC code and bank-specific account length.
+        This is the primary method that uses the new A/c Length (Min) column from IFSC master.
+        
+        Args:
+            text_results: List of (text, bbox, confidence) tuples
+            
+        Returns:
+            Dict with account number info or None if not found
+        """
+        print("🔍 Trying IFSC-based account length detection (primary method)...")
+        
+        # Step 1: Find IFSC code in the document
+        ifsc_code = None
+        for text, bbox, confidence in text_results:
+            # Look for IFSC patterns
+            ifsc_patterns = [
+                r'ifsc\s*code\s*[:\s]*([A-Z]{4}\d{7})',
+                r'ifsc[:\s]+([A-Z]{4}\d{7})',
+                r'ifs\s*code[:\s]*([A-Z]{4}\d{7})',
+                r'rtgs/?neft\s*ifsc[:\s]*([A-Z]{4}\d{7})',
+                r'\b([A-Z]{4}\d{7})\b'
+            ]
+            
+            for pattern in ifsc_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    potential_ifsc = match.group(1).upper()
+                    
+                    # Validate it's a proper IFSC and not in transaction context
+                    if re.match(r'^[A-Z]{4}\d{7}$', potential_ifsc):
+                        # Check if it's not in transaction context
+                        transaction_indicators = [
+                            'neft', 'rtgs', 'imps', 'upi', 'transfer', 'payment', 'transaction',
+                            'credit', 'debit', 'dr', 'cr', 'withdrawal', 'deposit'
+                        ]
+                        
+                        text_lower = text.lower()
+                        is_transaction = any(indicator in text_lower for indicator in transaction_indicators)
+                        is_long_line = len(text) > 100
+                        
+                        if not is_transaction and not is_long_line:
+                            ifsc_code = potential_ifsc
+                            print(f"   ✅ Found IFSC code: {ifsc_code}")
+                            break
+            
+            if ifsc_code:
+                break
+        
+        if not ifsc_code:
+            print("   ❌ No IFSC code found - cannot use length-based detection")
+            return None
+        
+        # Step 2: Look up bank details and account length
+        bank_details = self._lookup_bank_details_by_ifsc(ifsc_code)
+        if not bank_details:
+            print(f"   ❌ No bank details found for IFSC: {ifsc_code}")
+            return None
+        
+        account_length = bank_details.get('Account Length', 0)
+        if account_length <= 0:
+            print(f"   ❌ No account length found for IFSC: {ifsc_code}")
+            return None
+        
+        bank_name = bank_details.get('Bank Name', '')
+        print(f"   📊 Bank: {bank_name}, Expected account length: {account_length}")
+        
+        # Step 3: Search for account numbers with the specific length
+        potential_accounts = []
+        
+        # Create flexible length range (±2 digits for tolerance)
+        min_length = max(8, account_length - 2)
+        max_length = account_length + 2
+        
+        # Pattern for account numbers with the expected length
+        account_pattern = rf'^\d{{{min_length},{max_length}}}$'
+        
+        for text_idx, (text, bbox, confidence) in enumerate(text_results):
+            # Clean the text - remove common separators
+            cleaned_text = re.sub(r'[\s\-\.]', '', text.strip())
+            
+            # Check if it matches the expected length pattern
+            if re.match(account_pattern, cleaned_text):
+                # Additional validation for the specific length
+                if len(cleaned_text) == account_length:
+                    priority_score = 0.95  # Exact length match
+                elif min_length <= len(cleaned_text) <= max_length:
+                    priority_score = 0.85  # Within tolerance
+                else:
+                    continue
+                
+                # Apply enhanced validation
+                if self._is_valid_account_number(cleaned_text, text, text_results, text_idx, near_account_label=False):
+                    potential_accounts.append({
+                        'text': cleaned_text,
+                        'original_text': text,
+                        'bbox': bbox,
+                        'confidence': confidence,
+                        'method': 'ifsc_length_based',
+                        'ifsc_code': ifsc_code,
+                        'bank_name': bank_name,
+                        'expected_length': account_length,
+                        'actual_length': len(cleaned_text),
+                        'distance': 0.0,
+                        'spatial_score': 1.0,
+                        'validation_score': priority_score,
+                        'final_score': priority_score * 0.8 + confidence * 0.2,
+                        'index': text_idx
+                    })
+                    
+                    print(f"      ✅ Found account with length {len(cleaned_text)}: '{cleaned_text}' (expected: {account_length})")
+            
+            # Also check for fragmented account numbers (like "54440 17044 80")
+            if re.match(r'^[\d\s]+$', text.strip()) and len(text.strip()) > 8:
+                fragmented_number = re.sub(r'\s+', '', text.strip())
+                if min_length <= len(fragmented_number) <= max_length:
+                    if self._is_valid_account_number(fragmented_number, text, text_results, text_idx, near_account_label=False):
+                        priority_score = 0.9 if len(fragmented_number) == account_length else 0.8
+                        
+                        potential_accounts.append({
+                            'text': fragmented_number,
+                            'original_text': text,
+                            'bbox': bbox,
+                            'confidence': confidence,
+                            'method': 'ifsc_length_based_fragmented',
+                            'ifsc_code': ifsc_code,
+                            'bank_name': bank_name,
+                            'expected_length': account_length,
+                            'actual_length': len(fragmented_number),
+                            'distance': 0.0,
+                            'spatial_score': 1.0,
+                            'validation_score': priority_score,
+                            'final_score': priority_score * 0.8 + confidence * 0.2,
+                            'index': text_idx
+                        })
+                        
+                        print(f"      ✅ Found fragmented account with length {len(fragmented_number)}: '{fragmented_number}' from '{text}' (expected: {account_length})")
+        
+        if not potential_accounts:
+            print(f"   ❌ No account numbers found with expected length {account_length}")
+            return None
+        
+        # Sort by exact length match first, then by confidence
+        potential_accounts.sort(key=lambda x: (
+            -(x['actual_length'] == x['expected_length']),  # Exact length match first
+            -x['final_score']  # Then by confidence
+        ))
+        
+        best_account = potential_accounts[0]
+        print(f"   ✅ Best IFSC-based account: '{best_account['text']}' (length: {best_account['actual_length']}, expected: {best_account['expected_length']}, score: {best_account['final_score']:.2f})")
+        
+        return best_account
 
 
 # Example usage and testing
