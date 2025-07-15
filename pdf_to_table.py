@@ -299,9 +299,6 @@ class DocumentTableExtractor:
         """
         Extract tables from a readable PDF using img2table directly.
         """
-        import traceback
-        import sys
-        
         base_name = os.path.splitext(os.path.basename(pdf_path))[0]
         
         # Remove any "_readable" or "_reconstructed" suffix from the base name for cleaner output
@@ -326,8 +323,6 @@ class DocumentTableExtractor:
                     print("📋 Detected Canara Bank statement - using specialized settings")
             except Exception as e:
                 print(f"⚠️ Could not check bank type: {e}")
-                print("📋 Detailed error info:")
-                traceback.print_exc()
             
             # Use img2table with adjusted parameters to prevent division by zero
             pdf = PDF(pdf_path)
@@ -335,7 +330,6 @@ class DocumentTableExtractor:
             # Special handling for Canara Bank statements
             if is_canara_bank:
                 try:
-                    print("🔍 Attempting first Canara Bank specific settings...")
                     tables = pdf.extract_tables(
                         borderless_tables=True,
                         implicit_columns=True,
@@ -350,21 +344,9 @@ class DocumentTableExtractor:
                         intersection_y_tolerance=3  # Added Y tolerance
                     )
                 except Exception as e:
-                    print(f"⚠️ First attempt failed for Canara Bank: {str(e)}")
-                    print("📋 Detailed error traceback:")
-                    traceback.print_exc()
-                    print("\n🔍 Stack trace analysis:")
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    tb_list = traceback.extract_tb(exc_traceback)
-                    for filename, line, func, text in tb_list:
-                        print(f"  File: {filename}")
-                        print(f"  Line: {line}")
-                        print(f"  Function: {func}")
-                        print(f"  Code: {text}\n")
-                    
+                    print(f"⚠️ First attempt failed for Canara Bank: {e}")
                     # Try with alternative settings
                     try:
-                        print("🔄 Attempting second Canara Bank specific settings...")
                         tables = pdf.extract_tables(
                             borderless_tables=True,
                             implicit_columns=True,
@@ -378,23 +360,12 @@ class DocumentTableExtractor:
                             text_margin=5
                         )
                     except Exception as e2:
-                        print(f"⚠️ Second attempt failed for Canara Bank: {str(e2)}")
-                        print("📋 Detailed error traceback:")
-                        traceback.print_exc()
-                        print("\n🔍 Stack trace analysis:")
-                        exc_type, exc_value, exc_traceback = sys.exc_info()
-                        tb_list = traceback.extract_tb(exc_traceback)
-                        for filename, line, func, text in tb_list:
-                            print(f"  File: {filename}")
-                            print(f"  Line: {line}")
-                            print(f"  Function: {func}")
-                            print(f"  Code: {text}\n")
+                        print(f"⚠️ Second attempt failed for Canara Bank: {e2}")
                         print("ℹ️ Falling back to OCR method for Canara Bank statement")
                         return []
             else:
                 # Standard settings for other banks
                 try:
-                    print("🔍 Attempting first standard settings...")
                     tables = pdf.extract_tables(
                         borderless_tables=True,
                         implicit_columns=True,
@@ -407,20 +378,8 @@ class DocumentTableExtractor:
                         threshold_constant=2
                     )
                 except Exception as e:
-                    print(f"⚠️ First attempt failed: {str(e)}")
-                    print("📋 Detailed error traceback:")
-                    traceback.print_exc()
-                    print("\n🔍 Stack trace analysis:")
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    tb_list = traceback.extract_tb(exc_traceback)
-                    for filename, line, func, text in tb_list:
-                        print(f"  File: {filename}")
-                        print(f"  Line: {line}")
-                        print(f"  Function: {func}")
-                        print(f"  Code: {text}\n")
-                    
+                    print(f"⚠️ First attempt failed: {e}")
                     try:
-                        print("🔄 Attempting second standard settings...")
                         # Try with alternative settings
                         tables = pdf.extract_tables(
                             borderless_tables=True,
@@ -434,17 +393,7 @@ class DocumentTableExtractor:
                             threshold_constant=1
                         )
                     except Exception as e2:
-                        print(f"⚠️ Second attempt failed: {str(e2)}")
-                        print("📋 Detailed error traceback:")
-                        traceback.print_exc()
-                        print("\n🔍 Stack trace analysis:")
-                        exc_type, exc_value, exc_traceback = sys.exc_info()
-                        tb_list = traceback.extract_tb(exc_traceback)
-                        for filename, line, func, text in tb_list:
-                            print(f"  File: {filename}")
-                            print(f"  Line: {line}")
-                            print(f"  Function: {func}")
-                            print(f"  Code: {text}\n")
+                        print(f"⚠️ Second attempt failed: {e2}")
                         return []
 
             if not tables:
@@ -501,9 +450,7 @@ class DocumentTableExtractor:
                             print(f"✅ Table {table_num} on page {page_num}: {df.shape[0]} rows × {df.shape[1]} columns")
                                 
                         except Exception as table_error:
-                            print(f"⚠️ Error processing individual table {table_num} on page {page_num}: {str(table_error)}")
-                            print("📋 Detailed error traceback:")
-                            traceback.print_exc()
+                            print(f"⚠️ Error processing individual table {table_num} on page {page_num}: {table_error}")
                             continue
 
             if extracted_tables:
@@ -514,18 +461,8 @@ class DocumentTableExtractor:
                 return []
                 
         except Exception as e:
-            print(f"ℹ️ Could not process with img2table ({str(e)})")
-            print("📋 Detailed error traceback:")
-            traceback.print_exc()
-            print("\n🔍 Stack trace analysis:")
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            tb_list = traceback.extract_tb(exc_traceback)
-            for filename, line, func, text in tb_list:
-                print(f"  File: {filename}")
-                print(f"  Line: {line}")
-                print(f"  Function: {func}")
-                print(f"  Code: {text}\n")
-            print("💡 This is normal for some PDFs and the system will automatically use OCR instead")
+            print(f"ℹ️ Could not process with img2table ({str(e)}) - will try alternative method")
+            print(f"💡 This is normal for some PDFs and the system will automatically use OCR instead")
             return []
 
     def _extract_tables_with_ocr(self, input_path):
