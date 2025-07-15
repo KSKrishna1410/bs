@@ -348,6 +348,9 @@ class NekkantiOCR:
         Returns:
             list: List of dictionaries containing table data and metadata.
         """
+        import traceback
+        import sys
+        
         if pdf_path is None:
             raise ValueError("PDF path must be provided")
             
@@ -360,13 +363,35 @@ class NekkantiOCR:
         
         try:
             # Use img2table to extract tables
+            print("🔍 Creating PDF object...")
             pdf = Img2TablePDF(pdf_path)
-            tables = pdf.extract_tables(
-                borderless_tables=True,
-                implicit_columns=True,
-                implicit_rows=True,
-                min_confidence=50
-            )
+            
+            print("🔍 Attempting table extraction with the following parameters:")
+            print("   - borderless_tables: True")
+            print("   - implicit_columns: True")
+            print("   - implicit_rows: True")
+            print("   - min_confidence: 50")
+            
+            try:
+                tables = pdf.extract_tables(
+                    borderless_tables=True,
+                    implicit_columns=True,
+                    implicit_rows=True,
+                    min_confidence=50
+                )
+            except Exception as table_error:
+                print(f"❌ Error extracting tables with img2table: {str(table_error)}")
+                print("\n📋 Detailed error traceback:")
+                traceback.print_exc()
+                print("\n🔍 Stack trace analysis:")
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb_list = traceback.extract_tb(exc_traceback)
+                for filename, line, func, text in tb_list:
+                    print(f"  File: {filename}")
+                    print(f"  Line: {line}")
+                    print(f"  Function: {func}")
+                    print(f"  Code: {text}\n")
+                return []
             
             print(f"📊 Found {len(tables)} page(s) with tables")
             
@@ -387,16 +412,47 @@ class NekkantiOCR:
                     
                     for table_idx in range(len(page_tables)):
                         try:
+                            print(f"   🔍 Processing table {table_idx + 1} on page {page_num + 1}...")
                             # Get DataFrame from img2table
                             table = page_tables[table_idx]
-                            df = table.df.copy()
+                            
+                            try:
+                                df = table.df.copy()
+                            except Exception as df_error:
+                                print(f"❌ Error accessing table DataFrame: {str(df_error)}")
+                                print("\n📋 Detailed error traceback:")
+                                traceback.print_exc()
+                                print("\n🔍 Stack trace analysis:")
+                                exc_type, exc_value, exc_traceback = sys.exc_info()
+                                tb_list = traceback.extract_tb(exc_traceback)
+                                for filename, line, func, text in tb_list:
+                                    print(f"  File: {filename}")
+                                    print(f"  Line: {line}")
+                                    print(f"  Function: {func}")
+                                    print(f"  Code: {text}\n")
+                                continue
                             
                             if df.empty:
                                 print(f"⚠️  Table {table_idx + 1} on page {page_num + 1} is empty")
                                 continue
                             
-                            # Post-process the DataFrame to merge single-cell rows
-                            df = self._post_process_table(df)
+                            try:
+                                print("   🔄 Applying post-processing...")
+                                # Post-process the DataFrame to merge single-cell rows
+                                df = self._post_process_table(df)
+                            except Exception as post_error:
+                                print(f"❌ Error in post-processing: {str(post_error)}")
+                                print("\n📋 Detailed error traceback:")
+                                traceback.print_exc()
+                                print("\n🔍 Stack trace analysis:")
+                                exc_type, exc_value, exc_traceback = sys.exc_info()
+                                tb_list = traceback.extract_tb(exc_traceback)
+                                for filename, line, func, text in tb_list:
+                                    print(f"  File: {filename}")
+                                    print(f"  Line: {line}")
+                                    print(f"  Function: {func}")
+                                    print(f"  Code: {text}\n")
+                                continue
                             
                             # Create table metadata
                             table_data = {
@@ -412,6 +468,16 @@ class NekkantiOCR:
                             
                         except Exception as e:
                             print(f"❌ Error processing table {table_idx + 1} on page {page_num + 1}: {str(e)}")
+                            print("\n📋 Detailed error traceback:")
+                            traceback.print_exc()
+                            print("\n🔍 Stack trace analysis:")
+                            exc_type, exc_value, exc_traceback = sys.exc_info()
+                            tb_list = traceback.extract_tb(exc_traceback)
+                            for filename, line, func, text in tb_list:
+                                print(f"  File: {filename}")
+                                print(f"  Line: {line}")
+                                print(f"  Function: {func}")
+                                print(f"  Code: {text}\n")
                             continue
                 else:
                     print(f"❌ No tables found on page {page_num + 1}")
@@ -435,6 +501,17 @@ class NekkantiOCR:
                     
                 except Exception as e:
                     print(f"❌ Error saving Excel file: {str(e)}")
+                    print("\n📋 Detailed error traceback:")
+                    traceback.print_exc()
+                    print("\n🔍 Stack trace analysis:")
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb_list = traceback.extract_tb(exc_traceback)
+                    for filename, line, func, text in tb_list:
+                        print(f"  File: {filename}")
+                        print(f"  Line: {line}")
+                        print(f"  Function: {func}")
+                        print(f"  Code: {text}\n")
+                    
                     # Fallback to individual files if Excel writer fails
                     for table_data in all_tables:
                         try:
@@ -445,7 +522,9 @@ class NekkantiOCR:
                             print(f"💾 Table saved individually to: {individual_path}")
                         except Exception as fallback_e:
                             print(f"❌ Error saving individual table: {str(fallback_e)}")
-            
+                            print("\n📋 Detailed error traceback:")
+                            traceback.print_exc()
+        
             if all_tables:
                 print(f"🎉 Successfully extracted {len(all_tables)} table(s) from PDF")
             else:
@@ -454,7 +533,17 @@ class NekkantiOCR:
             return all_tables
             
         except Exception as e:
-            print(f"❌ Error extracting tables with img2table: {str(e)}")
+            print(f"❌ Error in table extraction: {str(e)}")
+            print("\n📋 Detailed error traceback:")
+            traceback.print_exc()
+            print("\n🔍 Stack trace analysis:")
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb_list = traceback.extract_tb(exc_traceback)
+            for filename, line, func, text in tb_list:
+                print(f"  File: {filename}")
+                print(f"  Line: {line}")
+                print(f"  Function: {func}")
+                print(f"  Code: {text}\n")
             return []
 
     def extract_tables_dataframes_only(self, pdf_path):
