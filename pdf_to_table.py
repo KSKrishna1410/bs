@@ -312,22 +312,44 @@ class DocumentTableExtractor:
         try:
             print(f"📄 Using img2table directly on readable PDF: {pdf_path}")
             
-            # Use img2table with the parameters specified in the user's example
+            # Use img2table with adjusted parameters to prevent division by zero
             pdf = PDF(pdf_path)
+            
+            # First try with more lenient settings
             tables = pdf.extract_tables(
                 borderless_tables=True,
                 implicit_columns=True,
                 implicit_rows=True,
-                min_confidence=50
+                min_confidence=50,
+                min_row_height=5,  # Add minimum row height
+                cell_margin=0.2,   # Add cell margin
+                line_scale=15,     # Adjust line scale
+                threshold_blocksize=15,  # Adjust threshold block size
+                threshold_constant=2      # Adjust threshold constant
             )
 
             if not tables:
-                print(f"❌ No tables found in the PDF with img2table")
+                # If no tables found, try with different settings
+                print(f"📋 Retrying with adjusted parameters...")
+                tables = pdf.extract_tables(
+                    borderless_tables=True,
+                    implicit_columns=True,
+                    implicit_rows=True,
+                    min_confidence=30,    # Lower confidence threshold
+                    min_row_height=3,     # Lower minimum row height
+                    cell_margin=0.1,      # Smaller cell margin
+                    line_scale=20,        # Different line scale
+                    threshold_blocksize=25, # Different threshold block size
+                    threshold_constant=1    # Different threshold constant
+                )
+
+            if not tables:
+                print(f"ℹ️ No tables found with img2table - will try alternative method")
                 return []
 
             total_tables_found = sum(len(page_tables) for page_tables in tables.values())
             if total_tables_found == 0:
-                print(f"❌ No valid tables found in any page with img2table")
+                print(f"ℹ️ No valid tables found with img2table - will try alternative method")
                 return []
 
             extracted_tables = []
@@ -338,6 +360,11 @@ class DocumentTableExtractor:
                     
                     for table_num, table in enumerate(page_tables):
                         try:
+                            # Add error checking for table.df access
+                            if not hasattr(table, 'df'):
+                                print(f"⚠️ Invalid table structure on page {page_num}, table {table_num}")
+                                continue
+                                
                             df = table.df.copy()
 
                             if df.empty or df.shape[0] < 2:
@@ -377,12 +404,12 @@ class DocumentTableExtractor:
                 print(f"💾 All tables saved to: {output_path}")
                 return extracted_tables
             else:
-                print(f"❌ No valid tables found to save")
+                print(f"ℹ️ No valid tables found - will try alternative method")
                 return []
                 
         except Exception as e:
-            print(f"❌ Error extracting tables from PDF with img2table: {str(e)}")
-            print(f"💡 This PDF might need OCR processing instead")
+            print(f"ℹ️ Could not process with img2table ({str(e)}) - will try alternative method")
+            print(f"💡 This is normal for some PDFs and the system will automatically use OCR instead")
             return []
 
     def _extract_tables_with_ocr(self, input_path):

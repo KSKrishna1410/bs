@@ -122,14 +122,6 @@ st.markdown("""
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
 
-def check_api_health() -> bool:
-    """Check if the API is running"""
-    try:
-        response = requests.get(f"{API_BASE_URL}/health", timeout=5)
-        return response.status_code == 200
-    except:
-        return False
-
 def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any, Any]]:
     """Process file through the API"""
     try:
@@ -347,13 +339,6 @@ def main():
         3. **View** extracted headers and tables
         4. **Download** results in CSV format
         """)
-        
-        st.header("🔧 API Status")
-        if check_api_health():
-            st.success("✅ API is running")
-        else:
-            st.error("❌ API is not available")
-            st.info("Please start the API server first:\n```bash\npython api.py\n```")
     
     # File upload
     st.header("📤 Upload Bank Statement")
@@ -407,10 +392,6 @@ def main():
         display_file_preview(file_bytes, uploaded_file.name)
         
         if process_button:
-            if not check_api_health():
-                st.error("❌ API is not available. Please start the API server first.")
-                return
-            
             # Process file using already loaded bytes
             result = process_file_with_api(file_bytes, uploaded_file.name)
             
@@ -460,8 +441,6 @@ def main():
                 file_name=f"{st.session_state.processed_filename}_response.json",
                 mime="application/json"
             )
-        
-
 
 if __name__ == "__main__":
     main() 
