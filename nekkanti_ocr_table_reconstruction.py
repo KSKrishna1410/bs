@@ -10,6 +10,12 @@ import fitz  # PyMuPDF
 import pandas as pd  
 import warnings
 from img2table.document import Image as Img2TableImage, PDF as Img2TablePDF
+import traceback
+import sys
+import cv2
+import numpy as np
+from img2table.tables.processing.bordered_tables.cells.identification import identify_cells
+from img2table.tables.processing.bordered_tables.cells.dataframe import get_cells_dataframe
 
 warnings.filterwarnings("ignore")
 
@@ -350,6 +356,10 @@ class NekkantiOCR:
         """
         import traceback
         import sys
+        import cv2
+        import numpy as np
+        from img2table.tables.processing.bordered_tables.cells.identification import identify_cells
+        from img2table.tables.processing.bordered_tables.cells.dataframe import get_cells_dataframe
         
         if pdf_path is None:
             raise ValueError("PDF path must be provided")
@@ -373,12 +383,48 @@ class NekkantiOCR:
             print("   - min_confidence: 50")
             
             try:
+                # Patch the identify_cells function to handle division by zero
+                original_identify_cells = identify_cells
+                
+                def safe_identify_cells(*args, **kwargs):
+                    try:
+                        return original_identify_cells(*args, **kwargs)
+                    except ZeroDivisionError:
+                        print("⚠️ Division by zero in cell identification - using fallback method")
+                        # Get the arrays from kwargs
+                        h_lines_arr = kwargs.get('h_lines_arr', args[0] if args else None)
+                        v_lines_arr = kwargs.get('v_lines_arr', args[1] if len(args) > 1 else None)
+                        
+                        if h_lines_arr is None or v_lines_arr is None:
+                            raise ValueError("Missing line arrays")
+                        
+                        # Create a simple grid-based cell array as fallback
+                        height, width = h_lines_arr.shape
+                        cells = np.zeros((height, width), dtype=int)
+                        cell_id = 1
+                        
+                        # Identify cells based on line intersections
+                        for i in range(height-1):
+                            for j in range(width-1):
+                                if h_lines_arr[i,j] and v_lines_arr[i,j]:
+                                    cells[i:i+2, j:j+2] = cell_id
+                                    cell_id += 1
+                        
+                        return cells
+                
+                # Replace the original function with our safe version
+                identify_cells = safe_identify_cells
+                
                 tables = pdf.extract_tables(
                     borderless_tables=True,
                     implicit_columns=True,
                     implicit_rows=True,
                     min_confidence=50
                 )
+                
+                # Restore the original function
+                identify_cells = original_identify_cells
+                
             except Exception as table_error:
                 print(f"❌ Error extracting tables with img2table: {str(table_error)}")
                 print("\n📋 Detailed error traceback:")
@@ -391,8 +437,25 @@ class NekkantiOCR:
                     print(f"  Line: {line}")
                     print(f"  Function: {func}")
                     print(f"  Code: {text}\n")
-                return []
-            
+                
+                # Try alternative method with more conservative parameters
+                try:
+                    print("🔄 Attempting alternative extraction method...")
+                    tables = pdf.extract_tables(
+                        borderless_tables=True,
+                        implicit_columns=True,
+                        implicit_rows=True,
+                        min_confidence=30,
+                        min_row_height=10,
+                        cell_margin=1.0,
+                        line_scale=30,
+                        threshold_blocksize=45,
+                        threshold_constant=15
+                    )
+                except Exception as alt_error:
+                    print(f"❌ Alternative method also failed: {str(alt_error)}")
+                    return []
+        
             print(f"📊 Found {len(tables)} page(s) with tables")
             
             all_tables = []
