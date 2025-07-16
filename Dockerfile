@@ -23,7 +23,7 @@ COPY requirements.txt .
 RUN pip install paddlepaddle==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 
 # Install other requirements
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application code
 COPY . .
