@@ -45,4 +45,4 @@ ftfy==6.1.1
 # Additional dependencies
 tensorboard==2.13.0
 tensorflow-io-gcs-filesystem==0.31.0
-tokenizers==0.13.3
+tokenizers==0.19.1
