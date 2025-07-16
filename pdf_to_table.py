@@ -334,14 +334,7 @@ class DocumentTableExtractor:
                         borderless_tables=True,
                         implicit_columns=True,
                         implicit_rows=True,
-                        min_confidence=40,
-                        min_row_height=10,     # Increased for Canara Bank
-                        cell_margin=0.5,       # Increased margin
-                        line_scale=25,         # Adjusted for Canara Bank
-                        threshold_blocksize=35, # Larger block size
-                        threshold_constant=10,  # Higher constant
-                        text_margin=3,         # Added text margin
-                        intersection_y_tolerance=3  # Added Y tolerance
+                        min_confidence=40
                     )
                 except Exception as e:
                     print(f"⚠️ First attempt failed for Canara Bank: {e}")
@@ -351,13 +344,7 @@ class DocumentTableExtractor:
                             borderless_tables=True,
                             implicit_columns=True,
                             implicit_rows=True,
-                            min_confidence=30,
-                            min_row_height=15,
-                            cell_margin=1.0,
-                            line_scale=30,
-                            threshold_blocksize=45,
-                            threshold_constant=15,
-                            text_margin=5
+                            min_confidence=30
                         )
                     except Exception as e2:
                         print(f"⚠️ Second attempt failed for Canara Bank: {e2}")
@@ -370,12 +357,7 @@ class DocumentTableExtractor:
                         borderless_tables=True,
                         implicit_columns=True,
                         implicit_rows=True,
-                        min_confidence=50,
-                        min_row_height=5,
-                        cell_margin=0.2,
-                        line_scale=15,
-                        threshold_blocksize=15,
-                        threshold_constant=2
+                        min_confidence=50
                     )
                 except Exception as e:
                     print(f"⚠️ First attempt failed: {e}")
@@ -385,12 +367,7 @@ class DocumentTableExtractor:
                             borderless_tables=True,
                             implicit_columns=True,
                             implicit_rows=True,
-                            min_confidence=30,
-                            min_row_height=3,
-                            cell_margin=0.1,
-                            line_scale=20,
-                            threshold_blocksize=25,
-                            threshold_constant=1
+                            min_confidence=30
                         )
                     except Exception as e2:
                         print(f"⚠️ Second attempt failed: {e2}")
