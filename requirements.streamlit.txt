@@ -3,3 +3,6 @@ requests==2.31.0
 pandas==1.5.3
 pillow==9.5.0
 numpy==1.24.4 
+PyMuPDF==1.26.1
+camelot-py==0.9.0
+pypdf2==3.0.1
