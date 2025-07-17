@@ -17,6 +17,8 @@ import time
 import base64
 from datetime import datetime
 import os
+import tempfile
+from PIL import Image
 
 # Authentication configuration
 AUTH_CREDENTIALS = {
@@ -274,21 +276,119 @@ def display_file_preview(file_bytes: bytes, filename: str) -> None:
     
     try:
         if file_extension == 'pdf':
-            # Display PDF
-            base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
+            try:
+                # First try: Use PyMuPDF to convert PDF pages to images
+                import fitz  # PyMuPDF
+                
+                # Create a temporary file to handle the PDF
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                    temp_file.write(file_bytes)
+                    temp_path = temp_file.name
+                
+                try:
+                    # Open the PDF
+                    pdf_document = fitz.open(temp_path)
+                    
+                    # Get number of pages
+                    num_pages = len(pdf_document)
+                    
+                    if num_pages > 0:
+                        # Create tabs for multiple pages
+                        if num_pages > 1:
+                            tabs = st.tabs([f"Page {i+1}" for i in range(num_pages)])
+                        else:
+                            tabs = [st.container()]  # Single container for one page
+                        
+                        # Display each page
+                        for page_num in range(num_pages):
+                            with tabs[page_num]:
+                                # Get the page
+                                page = pdf_document[page_num]
+                                
+                                # Convert page to image
+                                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+                                
+                                # Convert to PIL Image
+                                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                                
+                                # Display the image
+                                st.image(img, caption=f"Page {page_num + 1}", use_container_width=True)
+                                
+                                # Add download button for each page
+                                img_bytes = io.BytesIO()
+                                img.save(img_bytes, format='PNG')
+                                st.download_button(
+                                    label=f"📥 Download Page {page_num + 1} as Image",
+                                    data=img_bytes.getvalue(),
+                                    file_name=f"{filename}_page_{page_num + 1}.png",
+                                    mime="image/png"
+                                )
+                    else:
+                        st.warning("No pages found in the PDF")
+                    
+                    pdf_document.close()
+                    
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                        
+            except Exception as pdf_error:
+                st.warning(f"Could not render PDF preview: {str(pdf_error)}")
+                st.info("Falling back to basic PDF preview...")
+                
+                # Fallback: Basic PDF display with iframe
+                base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
+                pdf_display = f"""
+                <embed
+                    src="data:application/pdf;base64,{base64_pdf}"
+                    width="100%"
+                    height="800px"
+                    type="application/pdf"
+                >
+                """
+                st.markdown(pdf_display, unsafe_allow_html=True)
             
-            pdf_display = f"""
-            <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf">
-                <p>Your browser does not support PDFs. 
-                <a href="data:application/pdf;base64,{base64_pdf}">Download the PDF</a>.</p>
-            </iframe>
-            """
-            
-            st.markdown(pdf_display, unsafe_allow_html=True)
+            # Always provide download option
+            st.download_button(
+                label="📥 Download Original PDF",
+                data=file_bytes,
+                file_name=filename,
+                mime="application/pdf"
+            )
             
         elif file_extension in ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif']:
             # Display Image
-            st.image(file_bytes, caption=filename, use_column_width=True)
+            try:
+                # Convert bytes to PIL Image
+                image = Image.open(io.BytesIO(file_bytes))
+                
+                # Display image with improved quality
+                st.image(image, caption=filename, use_container_width=True)
+                
+                # Add image info
+                st.info(f"📊 Image Info: {image.size[0]}x{image.size[1]} pixels, Mode: {image.mode}")
+                
+                # Add download button
+                img_bytes = io.BytesIO()
+                image.save(img_bytes, format=image.format or 'PNG')
+                st.download_button(
+                    label="📥 Download Image",
+                    data=img_bytes.getvalue(),
+                    file_name=filename,
+                    mime=f"image/{image.format.lower() if image.format else 'png'}"
+                )
+            except Exception as img_error:
+                st.error(f"Could not display image preview: {str(img_error)}")
+                st.warning("Providing download option instead")
+                st.download_button(
+                    label="📥 Download Image",
+                    data=file_bytes,
+                    file_name=filename,
+                    mime=f"image/{file_extension}"
+                )
             
         else:
             # Fallback for unknown types
@@ -335,7 +435,7 @@ def main():
         st.header("📋 Instructions")
         st.markdown("""
         1. **Upload** your bank statement (PDF or image file)
-        2. **Process** it through our OCR engine
+        2. **Wait** while it's processed through our OCR engine
         3. **View** extracted headers and tables
         4. **Download** results in CSV format
         """)
@@ -345,10 +445,17 @@ def main():
     uploaded_file = st.file_uploader(
         "Choose a PDF or Image file",
         type=['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif'],
-        help="Upload your bank statement in PDF or image format (PNG, JPG, JPEG, BMP, TIFF, TIF)"
+        help="Upload your bank statement in PDF or image format (PNG, JPG, JPEG, BMP, TIFF, TIF)",
+        on_change=None  # Remove any callback if present
     )
     
     if uploaded_file is not None:
+        # Check if this is a new file
+        current_file = getattr(st.session_state, 'current_file', None)
+        if current_file != uploaded_file.name:
+            st.session_state.current_file = uploaded_file.name
+            st.session_state.file_processed = False
+        
         # File info
         file_size_kb = uploaded_file.size / 1024
         file_size_mb = file_size_kb / 1024
@@ -378,28 +485,28 @@ def main():
         st.session_state.uploaded_file_bytes = file_bytes
         st.session_state.uploaded_filename = uploaded_file.name
         
-        col1, col2 = st.columns([9, 1])
-        with col1:
-            st.info("📄 **File Information**")
-            for key, value in file_details.items():
-                st.write(f"**{key}:** {value}")
-        
-        with col2:
-            process_button = st.button("Process File", type="primary")
+        # Display file info
+        st.info("📄 **File Information**")
+        for key, value in file_details.items():
+            st.write(f"**{key}:** {value}")
         
         # Display file preview
         st.markdown("---")
         display_file_preview(file_bytes, uploaded_file.name)
         
-        if process_button:
-            # Process file using already loaded bytes
-            result = process_file_with_api(file_bytes, uploaded_file.name)
-            
-            if result:
-                # Store result in session state
-                st.session_state.processing_result = result
-                st.session_state.processed_filename = uploaded_file.name
-                st.success("✅ File processed successfully!")
+        # Auto-process if not already processed
+        if not getattr(st.session_state, 'file_processed', False):
+            with st.spinner("🔄 Processing file automatically..."):
+                result = process_file_with_api(file_bytes, uploaded_file.name)
+                
+                if result:
+                    # Store result in session state
+                    st.session_state.processing_result = result
+                    st.session_state.processed_filename = uploaded_file.name
+                    st.session_state.file_processed = True
+                    st.success("✅ File processed successfully!")
+                    # Force a rerun to update the UI
+                    st.rerun()
     
     # Display results if available
     if hasattr(st.session_state, 'processing_result') and st.session_state.processing_result:

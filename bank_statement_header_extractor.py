@@ -391,15 +391,37 @@ class BankStatementHeaderExtractor:
                 (r'statement\s+period[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
                 # "period: DD-MM-YYYY to DD-MM-YYYY"
                 (r'period[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
+                # "From: DD-MM-YYYY" or "From DD-MM-YYYY"
+                (r'from[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'from'),
+                # "To: DD-MM-YYYY" or "To DD-MM-YYYY"
+                (r'to[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'to'),
+                # "From Date: DD-MM-YYYY" or "From Date DD-MM-YYYY"
+                (r'from\s+date[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'from'),
+                # "To Date: DD-MM-YYYY" or "To Date DD-MM-YYYY"
+                (r'to\s+date[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'to'),
+                # "Statement From: DD-MM-YYYY"
+                (r'statement\s+from[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'from'),
+                # "Statement To: DD-MM-YYYY"
+                (r'statement\s+to[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'to'),
+                # "Date From: DD-MM-YYYY"
+                (r'date\s+from[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'from'),
+                # "Date To: DD-MM-YYYY"
+                (r'date\s+to[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'to'),
+                # "Period From: DD-MM-YYYY"
+                (r'period\s+from[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'from'),
+                # "Period To: DD-MM-YYYY"
+                (r'period\s+to[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'to'),
             ]
             
             for pattern, field_type in range_patterns:
                 if re.search(pattern, text_lower):
                     if field_type == 'both':
-                        # Add both FROM and TO matches
-                        for suffix, field_name in [('From', 'Statement Date From'), ('To', 'Statement Date To')]:
+                        # Extract both dates
+                        dates = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                        if len(dates) >= 2:
+                            # Add FROM date
                             key_matches.append({
-                                'field_name': field_name,
+                                'field_name': 'Statement Date From',
                                 'matched_text': text,
                                 'keyword': 'date range pattern',
                                 'bbox': bbox,
@@ -409,8 +431,86 @@ class BankStatementHeaderExtractor:
                                 'match_score': 0.95,
                                 'text_index': text_idx
                             })
+                            # Add TO date
+                            key_matches.append({
+                                'field_name': 'Statement Date To',
+                                'matched_text': text,
+                                'keyword': 'date range pattern',
+                                'bbox': bbox,
+                                'data_type': 'Date',
+                                'field_type': 'Header',
+                                'confidence': confidence,
+                                'match_score': 0.95,
+                                'text_index': text_idx
+                            })
+                    elif field_type == 'from':
+                        # Extract FROM date
+                        dates = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                        if dates:
+                            key_matches.append({
+                                'field_name': 'Statement Date From',
+                                'matched_text': text,
+                                'keyword': 'date pattern',
+                                'bbox': bbox,
+                                'data_type': 'Date',
+                                'field_type': 'Header',
+                                'confidence': confidence,
+                                'match_score': 0.95,
+                                'text_index': text_idx
+                            })
+                    elif field_type == 'to':
+                        # Extract TO date
+                        dates = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', text)
+                        if dates:
+                            key_matches.append({
+                                'field_name': 'Statement Date To',
+                                'matched_text': text,
+                                'keyword': 'date pattern',
+                                'bbox': bbox,
+                                'data_type': 'Date',
+                                'field_type': 'Header',
+                                'confidence': confidence,
+                                'match_score': 0.95,
+                                'text_index': text_idx
+                            })
             
-            # Pattern 3: Enhanced account number patterns with better detection
+            # Also look for standalone dates near date-related keywords
+            date_keywords = ['from', 'to', 'date', 'period', 'statement']
+            if any(keyword in text_lower for keyword in date_keywords):
+                # Look for dates in this text and next few elements
+                search_range = range(text_idx, min(len(text_results), text_idx + 3))
+                for search_idx in search_range:
+                    search_text = text_results[search_idx][0].lower()
+                    dates = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', search_text)
+                    if dates:
+                        # Determine if it's a from or to date based on context
+                        if 'from' in text_lower or 'start' in text_lower:
+                            key_matches.append({
+                                'field_name': 'Statement Date From',
+                                'matched_text': text_results[search_idx][0],
+                                'keyword': 'date near keyword',
+                                'bbox': text_results[search_idx][1],
+                                'data_type': 'Date',
+                                'field_type': 'Header',
+                                'confidence': text_results[search_idx][2],
+                                'match_score': 0.9,
+                                'text_index': search_idx
+                            })
+                        elif 'to' in text_lower or 'end' in text_lower:
+                            key_matches.append({
+                                'field_name': 'Statement Date To',
+                                'matched_text': text_results[search_idx][0],
+                                'keyword': 'date near keyword',
+                                'bbox': text_results[search_idx][1],
+                                'data_type': 'Date',
+                                'field_type': 'Header',
+                                'confidence': text_results[search_idx][2],
+                                'match_score': 0.9,
+                                'text_index': search_idx
+                            })
+                        break  # Found a date, no need to look further
+            
+            # Pattern 3: Account number patterns with better detection
             account_patterns = [
                 # "Account No. XXXXXXXXXXX6582" - Fixed for case insensitive matching
                 (r'account\s+no\.?\s+[Xx]+\d{3,8}', 'Account Number'),
@@ -585,43 +685,6 @@ class BankStatementHeaderExtractor:
                         'match_score': 0.9,
                         'text_index': text_idx
                     })
-            
-            # Pattern 7: Additional statement period patterns for specific banks
-            period_patterns = [
-                # "Statement From : 07/08/2024 To : 28/08/2024"
-                (r'statement\s+from[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
-                # "Transaction Period: From 01/04/2023 To 31/03/2024"
-                (r'transaction\s+period[:\s]+from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
-                # "From 29/07/2024 To 29/08/2024"
-                (r'from\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+to\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', 'both'),
-            ]
-            
-            for pattern, field_type in period_patterns:
-                if re.search(pattern, text_lower):
-                    if field_type == 'both':
-                        # Add both FROM and TO matches
-                        key_matches.append({
-                            'field_name': 'Statement Date From',
-                            'matched_text': text,
-                            'keyword': 'period pattern',
-                            'bbox': bbox,
-                            'data_type': 'Date',
-                            'field_type': 'Header',
-                            'confidence': confidence,
-                            'match_score': 0.9,
-                            'text_index': text_idx
-                        })
-                        key_matches.append({
-                            'field_name': 'Statement Date To',
-                            'matched_text': text,
-                            'keyword': 'period pattern',
-                            'bbox': bbox,
-                            'data_type': 'Date',
-                            'field_type': 'Header',
-                            'confidence': confidence,
-                            'match_score': 0.9,
-                            'text_index': text_idx
-                        })
     
     def _find_header_key_matches(self, text_results: List[Tuple]) -> List[Dict]:
         """
@@ -1895,6 +1958,9 @@ class BankStatementHeaderExtractor:
             'sb account', 'account details', 'customer account'
         ])
         
+        # Sort keywords by specificity (longer, more specific keywords first)
+        account_keywords.sort(key=len, reverse=True)
+        
         print(f"   📋 Using {len(account_keywords)} account keywords from mapping")
         
         potential_accounts = []
@@ -1932,32 +1998,7 @@ class BankStatementHeaderExtractor:
                     if any(indicator in search_text.lower() for indicator in transaction_indicators):
                         continue
                     
-                    # Pattern 1: Look for masked account numbers (XXXX1234)
-                    masked_match = re.search(r'[Xx]+\d{3,8}', search_text)
-                    if masked_match:
-                        number = masked_match.group().upper()
-                        if self._validate_account_number_format(number):
-                            distance_from_label = search_idx - text_idx
-                            confidence_score = max(0.5, 0.95 - (distance_from_label * 0.1))
-                            
-                            potential_accounts.append({
-                                'text': number,
-                                'original_text': search_text,
-                                'label_text': text,
-                                'bbox': search_bbox,
-                                'confidence': search_confidence,
-                                'method': 'keyword_masked',
-                                'distance': distance_from_label,
-                                'spatial_score': 1.0,
-                                'validation_score': 0.95,  # High score for masked accounts
-                                'final_score': 0.95,
-                                'index': search_idx,
-                                'keyword_used': matched_keyword
-                            })
-                            print(f"      ✅ Found masked account: '{number}' (keyword: {matched_keyword})")
-                            continue
-                    
-                    # Pattern 2: Look for numbers after common separators
+                    # Pattern 1: Look for numbers after common separators
                     separators = [':', '-', '–', '.', ' ']
                     for separator in separators:
                         if separator in search_text:
@@ -1966,8 +2007,16 @@ class BankStatementHeaderExtractor:
                                 # Clean and validate the part
                                 clean_part = re.sub(r'[^\d]', '', part.strip())
                                 if self._validate_account_number_format(clean_part):
+                                    # Skip if it's all zeros
+                                    if clean_part.count('0') == len(clean_part):
+                                        continue
+                                        
                                     distance_from_label = search_idx - text_idx
                                     confidence_score = max(0.5, 0.9 - (distance_from_label * 0.1))
+                                    
+                                    # Higher score for 'account no' or 'account number' keywords
+                                    if matched_keyword in ['account no', 'account number', 'account no.']:
+                                        confidence_score = max(confidence_score, 0.95)
                                     
                                     potential_accounts.append({
                                         'text': clean_part,
@@ -1986,12 +2035,41 @@ class BankStatementHeaderExtractor:
                                     print(f"      ✅ Found account after '{separator}': '{clean_part}' (keyword: {matched_keyword})")
                                     break
                     
+                    # Pattern 2: Look for masked account numbers (XXXX1234)
+                    masked_match = re.search(r'[Xx]+\d{3,8}', search_text)
+                    if masked_match:
+                        number = masked_match.group().upper()
+                        if self._validate_account_number_format(number):
+                            distance_from_label = search_idx - text_idx
+                            confidence_score = max(0.5, 0.85 - (distance_from_label * 0.1))
+                            
+                            potential_accounts.append({
+                                'text': number,
+                                'original_text': search_text,
+                                'label_text': text,
+                                'bbox': search_bbox,
+                                'confidence': search_confidence,
+                                'method': 'keyword_masked',
+                                'distance': distance_from_label,
+                                'spatial_score': 1.0,
+                                'validation_score': confidence_score,
+                                'final_score': confidence_score,
+                                'index': search_idx,
+                                'keyword_used': matched_keyword
+                            })
+                            print(f"      ✅ Found masked account: '{number}' (keyword: {matched_keyword})")
+                            continue
+                    
                     # Pattern 3: Look for fragmented account numbers (space-separated)
                     if re.match(r'^[\d\s]+$', search_text):
                         clean_number = re.sub(r'\s+', '', search_text)
                         if self._validate_account_number_format(clean_number):
+                            # Skip if it's all zeros
+                            if clean_number.count('0') == len(clean_number):
+                                continue
+                                
                             distance_from_label = search_idx - text_idx
-                            confidence_score = max(0.5, 0.85 - (distance_from_label * 0.1))
+                            confidence_score = max(0.5, 0.8 - (distance_from_label * 0.1))
                             
                             potential_accounts.append({
                                 'text': clean_number,
@@ -2015,16 +2093,24 @@ class BankStatementHeaderExtractor:
         
         # Sort by confidence and method priority
         method_priority = {
-            'keyword_masked': 3,    # Highest priority for masked accounts
-            'keyword_separator': 2,  # Good priority for separator-based
+            'keyword_separator': 3,  # Highest priority for separator-based (most reliable)
+            'keyword_masked': 2,     # Medium priority for masked accounts
             'keyword_fragmented': 1  # Lower priority for fragmented
         }
         
+        # Sort potential accounts by multiple criteria
         potential_accounts.sort(key=lambda x: (
-            method_priority.get(x['method'], 0),  # Sort by method priority first
-            -x['final_score'],                    # Then by confidence score
-            x['distance']                         # Then by distance from keyword
-        ))
+            # First: Keyword quality (exact account number keywords get priority)
+            x['keyword_used'] in ['account no', 'account number', 'account no.'],
+            # Second: Method priority
+            method_priority.get(x['method'], 0),
+            # Third: Final score
+            x['final_score'],
+            # Fourth: Inverse of zero count (fewer zeros is better)
+            -x['text'].count('0'),
+            # Fifth: Distance from keyword
+            -x['distance']
+        ), reverse=True)
         
         best_account = potential_accounts[0]
         print(f"   ✅ Best account using keywords: '{best_account['text']}' (method: {best_account['method']}, keyword: {best_account['keyword_used']})")

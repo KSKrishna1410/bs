@@ -54,7 +54,12 @@ class BankStatementExtractor:
         import re
         
         def clean_text(text):
-            if pd.isna(text) or text is None:
+            # Handle pandas Series
+            if isinstance(text, pd.Series):
+                return text.apply(clean_text)
+                
+            # Handle NaN, None, and empty values
+            if pd.isna(text) or text is None or text == '':
                 return text
             
             text = str(text)
@@ -78,7 +83,7 @@ class BankStatementExtractor:
         
         cleaned_df = df.copy()
         for col in cleaned_df.columns:
-            cleaned_df[col] = cleaned_df[col].apply(clean_text)
+            cleaned_df[col] = clean_text(cleaned_df[col])
         
         return cleaned_df
     
