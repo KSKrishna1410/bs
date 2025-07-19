@@ -24,26 +24,39 @@ warnings.filterwarnings("ignore")
 # Global OCR instance for multiprocessing
 global_ocr = None
 
-def init_worker():
-    """Initialize PaddleOCR instance for each worker process"""
-    global global_ocr
-    if global_ocr is None:
-        global_ocr = PaddleOCR(
+# Add singleton PaddleOCR instance at module level
+_paddle_ocr_instance = None
+
+def get_paddle_ocr():
+    """Get or create singleton PaddleOCR instance"""
+    global _paddle_ocr_instance
+    if _paddle_ocr_instance is None:
+        print("📚 Initializing PaddleOCR (one-time setup)...")
+        _paddle_ocr_instance = PaddleOCR(
             text_detection_model_name="PP-OCRv5_mobile_det",
             text_recognition_model_name="PP-OCRv5_mobile_rec",
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
             device="cpu",
-            enable_mkldnn=True,  # Enable MKL-DNN optimization
-            cpu_threads=2  # Limit CPU threads per process
+            # Removed MKLDNN settings since they're not supported
+            cpu_threads=2
         )
+    return _paddle_ocr_instance
+
+def init_worker():
+    """Initialize PaddleOCR instance for each worker process"""
+    global global_ocr
+    if global_ocr is None:
+        global_ocr = get_paddle_ocr()
 
 def process_page(page_data):
     """Process a single page in parallel"""
     global global_ocr
     image_path, page_num = page_data
     try:
+        if global_ocr is None:
+            global_ocr = get_paddle_ocr()
         result = global_ocr.predict(image_path)
         return page_num, result
     except Exception as e:
@@ -76,14 +89,8 @@ class DocumentOCR:
         ]:
             os.makedirs(dir_path, exist_ok=True)
         
-        self.ocr = PaddleOCR(
-            text_detection_model_name="PP-OCRv5_mobile_det",
-            text_recognition_model_name="PP-OCRv5_mobile_rec",
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-            device="cpu"
-        )
+        # Use singleton PaddleOCR instance
+        self.ocr = get_paddle_ocr()
 
     def detect_table_lines(self, image_path):
         """Detect table lines in the image using morphological operations."""
