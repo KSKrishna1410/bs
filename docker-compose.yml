@@ -1,5 +1,6 @@
+version: '3.8'
+
 services:
-  # Backend API Service
   api:
     build:
       context: .
@@ -7,31 +8,19 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - PYTHONPATH=/app
       - API_HOST=0.0.0.0
       - API_PORT=8000
+      - API_DEBUG=True
     volumes:
-      - ./comprehensive_output:/app/comprehensive_output
-      - ./bank_statement_output:/app/bank_statement_output
-      - ./bs_reconstructed_pdfs:/app/bs_reconstructed_pdfs
-      - ./ocr_outputs_reconstructed:/app/ocr_outputs_reconstructed
+      - ./data:/app/data
+      - ./temp:/app/temp
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 60s
-      timeout: 30s
+      interval: 30s
+      timeout: 10s
       retries: 3
-      start_period: 60s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-        reservations:
-          memory: 2G
-    networks:
-      - nekkanti-network
+      start_period: 10s
 
-  # Frontend Streamlit Service
   streamlit:
     build:
       context: .
@@ -39,27 +28,21 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - API_BASE_URL=http://api:8000
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
-      - USER_PASSWORD=${USER_PASSWORD:-user123}
-      - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
+      - API_HOST=api
+      - API_PORT=8000
+      - STREAMLIT_HOST=0.0.0.0
+      - STREAMLIT_PORT=8501
+      - ADMIN_PASSWORD=admin123
+      - USER_PASSWORD=user123
+      - DEMO_PASSWORD=demo123
+    volumes:
+      - ./data:/app/data
+      - ./temp:/app/temp
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-      - nekkanti-network
-
-networks:
-  nekkanti-network:
-    driver: bridge
-
-volumes:
-  output_data:
-    driver: local 
+      start_period: 10s 

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-API for Bank Statement OCR Processing
-
-This module provides a FastAPI interface for processing bank statements through OCR.
-It handles both scanned and digital PDFs, extracts headers and tables, and returns
-structured data.
+FastAPI application for bank statement processing
 """
 
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import tempfile
 import shutil
 import json
@@ -16,10 +15,11 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from pdf_to_table import DocumentTableExtractor
-from bank_statement_header_extractor import BankStatementHeaderExtractor
-from bank_statement_extractor import BankStatementExtractor
 import fitz  # PyMuPDF
+
+from bank_statements.utils.pdf_to_table import DocumentTableExtractor
+from bank_statements.extractors.header_extractor import BankStatementHeaderExtractor
+from bank_statements.extractors.table_extractor import BankStatementExtractor
 
 class PDFProcessor:
     """

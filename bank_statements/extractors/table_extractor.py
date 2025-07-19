@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-Bank Statement Table Extractor
-
-This module builds on top of DocumentTableExtractor to intelligently identify
-and consolidate bank statement transaction tables from extracted tables.
+Bank statement table extraction module
 """
 
 import os
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-from pdf_to_table import DocumentTableExtractor
+
+from ..utils.pdf_to_table import DocumentTableExtractor
 
 
 class BankStatementExtractor:

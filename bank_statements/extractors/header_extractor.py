@@ -15,7 +15,9 @@ import json
 import re
 import math
 from typing import List, Dict, Tuple, Optional, Any
-from pdf_to_table import DocumentTableExtractor
+
+from ..utils.pdf_to_table import DocumentTableExtractor
+from ..config.settings import BANK_KEYWORDS_FILE, IFSC_MASTER_FILE
 
 
 class BankStatementHeaderExtractor:

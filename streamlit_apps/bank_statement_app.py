@@ -7,6 +7,10 @@ process them through the OCR API, and display results in both raw and
 structured formats.
 """
 
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
 import requests
 import json
@@ -16,16 +20,15 @@ import io
 import time
 import base64
 from datetime import datetime
-import os
 import tempfile
 from PIL import Image
 
-# Authentication configuration
-AUTH_CREDENTIALS = {
-    "admin": os.getenv("ADMIN_PASSWORD", "admin123"),
-    "user": os.getenv("USER_PASSWORD", "user123"),
-    "demo": os.getenv("DEMO_PASSWORD", "demo123")
-}
+# Now we can import from bank_statements directory
+from bank_statements.config.settings import AUTH_CREDENTIALS, API_HOST, API_PORT
+
+# Update API endpoint
+API_BASE_URL = f"http://{API_HOST}:{API_PORT}"
+API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
 
 def check_authentication():
     """Check if user is authenticated"""
@@ -119,10 +122,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# API Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
 
 def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any, Any]]:
     """Process file through the API"""

@@ -1,0 +1,14 @@
+2025-07-19 09:43:22 [INFO] api: Received file: axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:43:24 [INFO] api: Processing document: /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmpvdfjwavv/axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:43:24 [INFO] api: Successfully processed axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:45:13 [INFO] api: Received file: axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:45:13 [ERROR] api: Error processing file: DocumentTableExtractor.__init__() got an unexpected keyword argument 'save_reconstructed_pdfs'
+2025-07-19 09:46:03 [INFO] api: Received file: axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:46:06 [INFO] api: Processing document: /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmp2m9ls9__/axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:46:06 [ERROR] api: Error processing document: 'DocumentTableExtractor' object has no attribute 'cleanup_all_temp_files'
+2025-07-19 09:46:06 [ERROR] api: Error processing file: 500: 'DocumentTableExtractor' object has no attribute 'cleanup_all_temp_files'
+2025-07-19 09:49:04 [INFO] api: Received file: axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:49:06 [ERROR] api: Error processing file: 'type'
+2025-07-19 09:50:58 [INFO] api: Received file: axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:51:01 [INFO] api: Processing document: /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmpcughg639/axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:51:01 [INFO] api: Successfully processed axis_bank__statement_for_september_2024_Original.pdf

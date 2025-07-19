@@ -15,9 +15,17 @@ warnings.filterwarnings("ignore")
 
 
 class NekkantiOCR:
-    def __init__(self, output_dir="ocr_outputs_reconstructed"):
+    def __init__(self, output_dir="comprehensive_output"):
+        """Initialize the OCR processor with output directory"""
         self.output_dir = output_dir
+        self.tables_dir = os.path.join(output_dir, "tables")
+        self.temp_ocr_dir = os.path.join(self.tables_dir, "temp_ocr_processing")
+        
+        # Create all required directories
         os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.tables_dir, exist_ok=True)
+        os.makedirs(self.temp_ocr_dir, exist_ok=True)
+        
         self.ocr = PaddleOCR(
             text_detection_model_name="PP-OCRv5_mobile_det",
             text_recognition_model_name="PP-OCRv5_mobile_rec",
@@ -192,6 +200,7 @@ class NekkantiOCR:
                 print(f"⚠️  Warning: Could not remove temp file {temp_file}: {e}")
 
     def ocr_and_reconstruct(self, input_path):
+        """OCR and reconstruct a document"""
         temp_image_paths = []
         
         try:
@@ -223,7 +232,7 @@ class NekkantiOCR:
             self.original_width = img.shape[1]
             print(f"📐 Image dimensions: {self.original_width}x{self.original_height}")
 
-            # Run OCR on the input (PaddleOCR can handle both images and PDFs)
+            # Run OCR on the input
             print(f"🔍 Running OCR on input...")
             result = self.ocr.predict(input_path)
             ocr_data = [self.convert_ndarray(dict(res)) for res in result]
@@ -231,7 +240,10 @@ class NekkantiOCR:
 
             # Create reconstructed PDF
             base_name = os.path.splitext(os.path.basename(input_path))[0]
-            pdf_path = os.path.join(self.output_dir, f"{base_name}_reconstructed.pdf")
+            pdf_path = os.path.join(self.temp_ocr_dir, f"{base_name}_reconstructed.pdf")
+            
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
             
             print(f"📄 Creating reconstructed PDF: {os.path.basename(pdf_path)}")
 
@@ -254,7 +266,7 @@ class NekkantiOCR:
                     c.showPage()
                     c.setPageSize((img_width, img_height))
 
-                # Detect and draw lines (use appropriate image for line detection)
+                # Detect and draw lines
                 try:
                     if self._is_pdf(input_path) and i < len(temp_image_paths):
                         horizontal, vertical, table_mask = self.detect_table_lines(temp_image_paths[i])
@@ -276,27 +288,19 @@ class NekkantiOCR:
                         y = min(p[1] for p in poly)
                         y_pdf = invert_y(y)
                         
-                        # Add horizontal offset (adjust this value as needed)
+                        # Add horizontal offset
                         horizontal_offset = 10  # pixels
                         x = x + horizontal_offset
                         
-                        # Calculate the bounding box dimensions
+                        # Calculate bounding box dimensions
                         height = max(abs(p[1] - poly[0][1]) for p in poly)
                         width = max(abs(p[0] - poly[0][0]) for p in poly)
                         
-                        # Calculate average character width (assuming average character is about 60% of height)
+                        # Calculate font size
                         avg_char_width = height * 0.6
-                        
-                        # Estimate number of characters that should fit in the width
                         num_chars = max(1, width / avg_char_width)
-                        
-                        # Calculate font size based on height with a small margin
-                        height_based_size = int(height * 0.85)  # 85% of height to leave some margin
-                        
-                        # Calculate font size based on width and number of characters
-                        width_based_size = int(width / num_chars * 0.85)  # 85% of width per character
-                        
-                        # Use the minimum of both sizes to ensure text fits
+                        height_based_size = int(height * 0.85)
+                        width_based_size = int(width / num_chars * 0.85)
                         font_size = max(min(height_based_size, width_based_size), 6)
                         
                         # Set font and draw text

@@ -1,39 +1,33 @@
 FROM python:3.10-slim
 
-# Install basic dependencies and PyMuPDF dependencies
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y \
-    curl \
     build-essential \
     python3-dev \
     libffi-dev \
     libmupdf-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Copy requirements files
+COPY bank_statements/requirements.txt bank_statements/requirements.txt
+COPY streamlit_apps/requirements.txt streamlit_apps/requirements.txt
 
-# Copy requirements for Streamlit (we'll create a minimal one)
-COPY requirements.streamlit.txt .
+# Install Python dependencies
+RUN pip install --no-cache-dir -r bank_statements/requirements.txt
+RUN pip install --no-cache-dir -r streamlit_apps/requirements.txt
 
-# Install Streamlit dependencies
-RUN pip install -r requirements.streamlit.txt
+# Copy source code
+COPY bank_statements/ bank_statements/
+COPY streamlit_apps/ streamlit_apps/
+COPY bankstmt_allkeys.csv .
+COPY IFSC_master.csv .
 
-# Copy Streamlit app and related files
-COPY streamlit_app.py .
-COPY README.md .
-
-# Create a user for running Streamlit (security best practice)
-RUN useradd -m -u 1000 streamlit_user && \
-    chown -R streamlit_user:streamlit_user /app
-
-USER streamlit_user
+# Install local package
+RUN pip install -e bank_statements/
 
 # Expose Streamlit port
 EXPOSE 8501
 
-# Health check for Streamlit
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
-
-# Start Streamlit
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--server.fileWatcherType=none"] 
+# Run Streamlit app
+CMD ["streamlit", "run", "streamlit_apps/bank_statement_app.py", "--server.port=8501", "--server.address=0.0.0.0"] 

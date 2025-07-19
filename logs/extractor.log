@@ -1,0 +1,17 @@
+2025-07-19 09:43:24 [INFO] extractor: Initializing BankStatementExtractor
+2025-07-19 09:43:24 [INFO] extractor: Extracting tables from /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmpvdfjwavv/axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:43:24 [ERROR] extractor: Error extracting tables: 'DocumentTableExtractor' object has no attribute 'extract_tables'
+2025-07-19 09:46:05 [INFO] extractor: Initializing BankStatementExtractor
+2025-07-19 09:49:04 [INFO] extractor: Initializing BankStatementHeaderExtractor
+2025-07-19 09:50:58 [INFO] extractor: Initializing BankStatementHeaderExtractor
+2025-07-19 09:51:00 [INFO] extractor: Loaded 54 HEADER-only keyword mappings
+2025-07-19 09:51:00 [INFO] extractor: Ignored 49 non-header fields (Line/Others)
+2025-07-19 09:51:00 [INFO] extractor: Created mappings for 1 header field types:
+2025-07-19 09:51:00 [INFO] extractor:    • Header
+2025-07-19 09:51:00 [INFO] extractor: Found account length column: A/c Length (Min)
+2025-07-19 09:51:00 [INFO] extractor: Loaded 80044 IFSC entries from 9 banks
+2025-07-19 09:51:00 [INFO] extractor: Initializing BankStatementExtractor
+2025-07-19 09:51:01 [INFO] extractor: Extracted 190 text elements from first 2 page(s)
+2025-07-19 09:51:01 [INFO] extractor: Extracting tables from /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmpcughg639/axis_bank__statement_for_september_2024_Original.pdf
+2025-07-19 09:51:01 [INFO] extractor: Found 0 tables
+2025-07-19 09:51:01 [WARNING] extractor: No tables successfully processed

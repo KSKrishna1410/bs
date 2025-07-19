@@ -1,3 +1,7 @@
+"""
+PDF to table extraction utilities
+"""
+
 import os
 import json
 import numpy as np
@@ -10,10 +14,9 @@ import fitz  # PyMuPDF
 import pandas as pd
 import warnings
 from img2table.document import PDF
-import fitz  # PyMuPDF
+from pathlib import Path
 
-# Import the NekkantiOCR class for OCR and reconstruction
-from nekkanti_ocr_table_reconstruction import NekkantiOCR
+from .nekkanti_ocr import NekkantiOCR
 
 warnings.filterwarnings("ignore")
 
@@ -27,23 +30,29 @@ class DocumentTableExtractor:
     
     The class automatically detects the document type and uses the appropriate extraction method.
     """
-    def __init__(self, output_dir="bs_tables_extracted", save_reconstructed_pdfs=True):
+    def __init__(self, output_dir="comprehensive_output", save_reconstructed_pdfs=True):
+        """Initialize the table extractor"""
         self.output_dir = output_dir
+        self.tables_dir = os.path.join(output_dir, "tables")
+        self.extracted_tables_dir = os.path.join(output_dir, "extracted_tables")
+        self.temp_ocr_dir = os.path.join(self.tables_dir, "temp_ocr_processing")
+        
+        # Create all required directories
         os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.tables_dir, exist_ok=True)
+        os.makedirs(self.extracted_tables_dir, exist_ok=True)
+        os.makedirs(self.temp_ocr_dir, exist_ok=True)
         
         # Option to save reconstructed PDFs
         self.save_reconstructed_pdfs = save_reconstructed_pdfs
         
         # Directory for reconstructed PDFs
-        self.reconstructed_pdf_dir = "bs_reconstructed_pdfs"
+        self.reconstructed_pdf_dir = os.path.join(output_dir, "reconstructed_pdfs")
         if self.save_reconstructed_pdfs:
             os.makedirs(self.reconstructed_pdf_dir, exist_ok=True)
         
-        # Initialize the NekkantiOCR class for OCR and reconstruction
-        # Use a temporary directory that we can easily clean up
-        temp_ocr_dir = os.path.join(self.output_dir, "temp_ocr_processing")
-        os.makedirs(temp_ocr_dir, exist_ok=True)  # Ensure it exists upfront
-        self.ocr_processor = NekkantiOCR(output_dir=temp_ocr_dir)
+        # Initialize the NekkantiOCR class with our temp directory
+        self.ocr_processor = NekkantiOCR(output_dir=self.output_dir)
 
     def _clean_dataframe_text(self, df):
         """
@@ -307,7 +316,7 @@ class DocumentTableExtractor:
         elif base_name.endswith("_reconstructed"):
             base_name = base_name[:-14]
         
-        output_path = os.path.join(self.output_dir, f"{base_name}.xlsx")
+        output_path = os.path.join(self.extracted_tables_dir, f"{base_name}.xlsx")
 
         try:
             print(f"📄 Using img2table directly on readable PDF: {pdf_path}")
@@ -469,7 +478,7 @@ class DocumentTableExtractor:
                 base_name = base_name[:-5]
             
             # Create Excel file in DocumentTableExtractor's output directory
-            output_path = os.path.join(self.output_dir, f"{base_name}.xlsx")
+            output_path = os.path.join(self.extracted_tables_dir, f"{base_name}.xlsx")
             
             # Debug: Print file path for troubleshooting
             print(f"📁 Creating Excel file at: {output_path}")
@@ -527,8 +536,8 @@ class DocumentTableExtractor:
             
             # Ensure file exists in expected locations for BankStatementExtractor
             backup_locations = [
-                os.path.join(self.output_dir, "extracted_tables", f"{base_name}.xlsx"),
-                os.path.join(self.output_dir, "temp_ocr_processing", f"{base_name}.xlsx")
+                os.path.join(self.extracted_tables_dir, f"{base_name}.xlsx"),
+                os.path.join(self.temp_ocr_dir, f"{base_name}.xlsx")
             ]
             
             for backup_location in backup_locations:
@@ -887,7 +896,7 @@ if __name__ == "__main__":
                     
                 # Show where files are saved
                 print(f"\n📁 Output files:")
-                print(f"   📊 Tables: {extractor.output_dir}/")
+                print(f"   📊 Tables: {extractor.extracted_tables_dir}/")
                 if extractor.save_reconstructed_pdfs:
                     print(f"   📄 Reconstructed PDFs: {extractor.reconstructed_pdf_dir}/")
                     
