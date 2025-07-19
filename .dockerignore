@@ -1,81 +1,70 @@
-# Version control
+# Git
 .git
 .gitignore
 
 # Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
 .Python
-env
-pip-log.txt
-pip-delete-this-directory.txt
-.tox
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+venv-v5/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp files
+temp/
+*.tmp
+*.temp
+
+# Logs
+*.log
+logs/
+
+# Local development
+.env
+.env.local
+*.local
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Test coverage
+htmlcov/
+.tox/
 .coverage
 .coverage.*
 .cache
 nosetests.xml
 coverage.xml
 *.cover
-*.log
-.pytest_cache/
-
-# Virtual environments
-venv/
-venv-v5/
-ENV/
-env/
-.venv
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Output directories (will be mounted as volumes)
-temp/
-bank_statement_output/
-bs_reconstructed_pdfs/
-ocr_outputs_reconstructed/
-header_extraction_output/
-BankStatements_Results/
-bs_tables_extracted/
-
-# Temporary files
-*.tmp
-*.temp
-temp/
-tmp/
+.hypothesis/
 
 # Documentation
-*.md
-!README.md
-
-# Test files
-test_*.json
-*_test.py
-
-# Bank statement sample files (large files)
-BankStatements SK2/
-*.pdf
-
-# Jupyter notebooks
-*.ipynb
-.ipynb_checkpoints/
-
-# Docker files (only needed for context)
-Dockerfile*
-docker-compose*.yml
-.dockerignore 
+docs/_build/
+docs/api/ 

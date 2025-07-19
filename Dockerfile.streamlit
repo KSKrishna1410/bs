@@ -9,22 +9,15 @@ RUN apt-get update && \
     libmupdf-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements files
-COPY bank_statements/requirements.txt bank_statements/requirements.txt
-COPY streamlit_apps/requirements.txt streamlit_apps/requirements.txt
+# Set working directory
+WORKDIR /app
+
+# Copy entire project
+COPY . .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r bank_statements/requirements.txt
-RUN pip install --no-cache-dir -r streamlit_apps/requirements.txt
-
-# Copy source code
-COPY bank_statements/ bank_statements/
-COPY streamlit_apps/ streamlit_apps/
-COPY bankstmt_allkeys.csv .
-COPY IFSC_master.csv .
-
-# Install local package
-RUN pip install -e bank_statements/
+RUN pip install --no-cache-dir -r requirements.streamlit.txt
+RUN pip install --no-cache-dir -e bank_statements/
 
 # Expose Streamlit port
 EXPOSE 8501
