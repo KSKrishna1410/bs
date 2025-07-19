@@ -52,36 +52,27 @@ class BankStatementExtractor:
         import re
         
         def clean_text(text):
-            # Handle pandas Series
-            if isinstance(text, pd.Series):
-                return text.apply(clean_text)
-                
-            # Handle NaN, None, and empty values
-            if pd.isna(text) or text is None or text == '':
+            """Clean text by removing Unicode artifacts and standardizing whitespace"""
+            if pd.isna(text) or not isinstance(text, str):
                 return text
-            
-            text = str(text)
-            
-            # Remove Unicode escape sequences like x005F_xFFFE_
-            text = re.sub(r'x[0-9A-Fa-f]{4}_x[0-9A-Fa-f]{4}_?', '', text)
+                
+            # Remove Unicode escape sequences
+            text = re.sub(r'x[0-9A-Fa-f]{4}_x[0-9A-Fa-f]{4}_?', '', str(text))
             text = re.sub(r'x[0-9A-Fa-f]{2,8}_?', '', text)
             
             # Remove other common OCR artifacts
             text = re.sub(r'_x[0-9A-Fa-f]+_?', '', text)
-            text = re.sub(r'[^\x20-\x7E\u00A0-\uFFFF]', '', text)  # Keep printable chars + extended Unicode
+            text = re.sub(r'[^\x20-\x7E\u00A0-\uFFFF]', '', text)
             
-            # Remove multiple spaces and clean up
+            # Standardize whitespace
             text = re.sub(r'\s+', ' ', text).strip()
-            
-            # Remove very short meaningless strings that are likely artifacts
-            if len(text) <= 2 and not text.isdigit() and not text.isalpha():
-                return ''
             
             return text
         
         cleaned_df = df.copy()
         for col in cleaned_df.columns:
-            cleaned_df[col] = clean_text(cleaned_df[col])
+            if cleaned_df[col].dtype == 'object':  # Only clean string/object columns
+                cleaned_df[col] = cleaned_df[col].apply(lambda x: clean_text(x))
         
         return cleaned_df
     
