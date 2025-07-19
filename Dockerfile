@@ -3,7 +3,6 @@ FROM python:3.10
 # Set environment variables for better memory management
 ENV MALLOC_ARENA_MAX=2
 ENV OMP_NUM_THREADS=2
-ENV MKL_NUM_THREADS=2
 ENV NUMEXPR_NUM_THREADS=2
 ENV OPENBLAS_NUM_THREADS=2
 
@@ -21,28 +20,26 @@ RUN apt-get update && \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Add ulimit settings for the container
-RUN echo "* soft nofile 65536" >> /etc/security/limits.conf && \
-    echo "* hard nofile 65536" >> /etc/security/limits.conf
-
-# Add DNS settings
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
-    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
 
 WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.api.txt .
+
+# Install PaddlePaddle first to avoid conflicts
+RUN pip install paddlepaddle==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+
+# Install other requirements
+RUN pip install --no-cache-dir -r requirements.api.txt
 
 # Copy the application code
 COPY . .
 
-# Install PaddlePaddle first to avoid conflicts
-RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple pip -U && \
-    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --no-cache-dir -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ paddlepaddle==3.1.0 || \
-    (sleep 5 && pip install --no-cache-dir -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ paddlepaddle==3.1.0) || \
-    (sleep 10 && pip install --no-cache-dir -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ paddlepaddle==3.1.0)
+# Add ulimit settings for the container
+RUN echo "* soft nofile 65536" >> /etc/security/limits.conf && \
+    echo "* hard nofile 65536" >> /etc/security/limits.conf
 
-# Install other requirements
-RUN pip install --no-cache-dir -r requirements.api.txt
+
 
 # Expose the API port
 EXPOSE 8000
