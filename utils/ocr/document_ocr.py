@@ -15,8 +15,37 @@ import pandas as pd
 import warnings
 from img2table.document import Image as Img2TableImage, PDF as Img2TablePDF
 from pathlib import Path
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from functools import partial
 
 warnings.filterwarnings("ignore")
+
+# Global OCR instance for multiprocessing
+global_ocr = None
+
+def init_worker():
+    """Initialize PaddleOCR instance for each worker process"""
+    global global_ocr
+    global_ocr = PaddleOCR(
+        text_detection_model_name="PP-OCRv5_mobile_det",
+        text_recognition_model_name="PP-OCRv5_mobile_rec",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        device="cpu"
+    )
+
+def process_page(page_data):
+    """Process a single page in parallel"""
+    global global_ocr
+    image_path, page_num = page_data
+    try:
+        result = global_ocr.predict(image_path)
+        return page_num, result
+    except Exception as e:
+        print(f"Error processing page {page_num}: {e}")
+        return page_num, None
 
 
 class DocumentOCR:
@@ -261,7 +290,7 @@ class DocumentOCR:
         return temp_path
 
     def ocr_and_reconstruct(self, input_path):
-        """OCR and reconstruct a document"""
+        """OCR and reconstruct a document using parallel processing for multiple pages"""
         temp_image_paths = []
         
         try:
@@ -280,6 +309,7 @@ class DocumentOCR:
             else:
                 # It's an image file
                 primary_image_path = input_path
+                temp_image_paths = [input_path]
             
             # Verify primary image exists and is readable
             if not os.path.exists(primary_image_path):
@@ -293,10 +323,22 @@ class DocumentOCR:
             self.original_width = img.shape[1]
             print(f"📐 Image dimensions: {self.original_width}x{self.original_height}")
 
-            # Run OCR on the input
-            print(f"🔍 Running OCR on input...")
-            result = self.ocr.predict(input_path)
-            ocr_data = [self.convert_ndarray(dict(res)) for res in result]
+            # Prepare data for parallel processing
+            page_data = [(path, idx) for idx, path in enumerate(temp_image_paths)]
+            
+            # Determine optimal number of processes
+            num_processes = min(mp.cpu_count(), len(page_data))
+            print(f"🚀 Processing {len(page_data)} pages using {num_processes} processes")
+
+            # Process pages in parallel
+            ocr_data = []
+            with ProcessPoolExecutor(max_workers=num_processes, initializer=init_worker) as executor:
+                results = list(executor.map(process_page, page_data))
+                
+                # Sort results by page number and extract OCR data
+                results.sort(key=lambda x: x[0])  # Sort by page number
+                ocr_data = [self.convert_ndarray(dict(res[1][0])) if res[1] else {} for res in results]
+            
             print(f"📝 OCR completed: {len(ocr_data)} pages processed")
 
             # Create reconstructed PDF
@@ -311,8 +353,12 @@ class DocumentOCR:
             c = None
 
             for i, page_result in enumerate(ocr_data):
-                rec_texts = page_result["rec_texts"]
-                rec_polys = page_result["rec_polys"]
+                if not page_result:
+                    print(f"⚠️ No text found on page {i+1}")
+                    continue
+
+                rec_texts = page_result.get("rec_texts", [])
+                rec_polys = page_result.get("rec_polys", [])
 
                 if not rec_polys:
                     print(f"⚠️ No text found on page {i+1}")
@@ -403,9 +449,48 @@ class DocumentOCR:
         result = self.ocr.predict(input_path)
         return [self.convert_ndarray(dict(res)) for res in result]
 
+    def process_table_page(self, page_data):
+        """Process tables from a single page in parallel"""
+        page_num, tables = page_data
+        all_tables = []
+        
+        if tables and len(tables) > 0:
+            print(f"📊 Found {len(tables)} table(s) on page {page_num + 1}")
+            
+            for table_idx in range(len(tables)):
+                try:
+                    # Get DataFrame from img2table
+                    table = tables[table_idx]
+                    df = table.df.copy()
+                    
+                    if df.empty:
+                        print(f"⚠️  Table {table_idx + 1} on page {page_num + 1} is empty")
+                        continue
+                    
+                    # Post-process the DataFrame to merge single-cell rows
+                    df = self._post_process_table(df)
+                    
+                    # Create table metadata
+                    table_data = {
+                        'page_number': page_num + 1,
+                        'table_index': table_idx + 1,
+                        'dataframe': df,
+                        'shape': df.shape,
+                        'columns': df.columns.tolist(),
+                    }
+                    
+                    all_tables.append(table_data)
+                    print(f"✅ Table {table_idx + 1} extracted and processed: {df.shape[0]} rows × {df.shape[1]} columns")
+                    
+                except Exception as e:
+                    print(f"❌ Error processing table {table_idx + 1} on page {page_num + 1}: {str(e)}")
+                    continue
+        
+        return page_num, all_tables
+
     def extract_tables_from_pdf(self, pdf_path=None, save_to_excel=True):
         """
-        Extract tables from a PDF using img2table.
+        Extract tables from a PDF using img2table with parallel processing.
         
         Args:
             pdf_path (str, optional): Path to the PDF file. If None, will try to use the last reconstructed PDF.
@@ -436,54 +521,29 @@ class DocumentOCR:
             
             print(f"📊 Found {len(tables)} page(s) with tables")
             
-            all_tables = []
+            # Prepare data for parallel processing
+            page_data = [(page_num, page_tables) for page_num, page_tables in enumerate(tables)]
             
-            # Only create Excel writer if saving is requested
-            excel_path = None
-            if save_to_excel:
+            # Determine optimal number of processes
+            num_processes = min(mp.cpu_count(), len(page_data))
+            print(f"🚀 Processing tables using {num_processes} processes")
+            
+            # Process tables in parallel
+            all_tables = []
+            with ThreadPoolExecutor(max_workers=num_processes) as executor:
+                process_func = partial(self.process_table_page)
+                results = list(executor.map(process_func, page_data))
+                
+                # Sort results by page number and collect tables
+                results.sort(key=lambda x: x[0])  # Sort by page number
+                for _, page_tables in results:
+                    all_tables.extend(page_tables)
+            
+            # Only create Excel writer if saving is requested and tables were found
+            if all_tables and save_to_excel:
                 excel_filename = f"{base_name}_reconstructed_tables.xlsx"
                 excel_path = os.path.join(self.output_dir, excel_filename)
-            
-            # Process tables from each page
-            for page_num in range(len(tables)):
-                page_tables = tables[page_num]
                 
-                if page_tables and len(page_tables) > 0:
-                    print(f"📊 Found {len(page_tables)} table(s) on page {page_num + 1}")
-                    
-                    for table_idx in range(len(page_tables)):
-                        try:
-                            # Get DataFrame from img2table
-                            table = page_tables[table_idx]
-                            df = table.df.copy()
-                            
-                            if df.empty:
-                                print(f"⚠️  Table {table_idx + 1} on page {page_num + 1} is empty")
-                                continue
-                            
-                            # Post-process the DataFrame to merge single-cell rows
-                            df = self._post_process_table(df)
-                            
-                            # Create table metadata
-                            table_data = {
-                                'page_number': page_num + 1,
-                                'table_index': table_idx + 1,
-                                'dataframe': df,
-                                'shape': df.shape,
-                                'columns': df.columns.tolist(),
-                            }
-                            
-                            all_tables.append(table_data)
-                            print(f"✅ Table {table_idx + 1} extracted and processed: {df.shape[0]} rows × {df.shape[1]} columns")
-                            
-                        except Exception as e:
-                            print(f"❌ Error processing table {table_idx + 1} on page {page_num + 1}: {str(e)}")
-                            continue
-                else:
-                    print(f"❌ No tables found on page {page_num + 1}")
-            
-            # Save all tables to a single Excel file with multiple sheets (only if requested)
-            if all_tables and save_to_excel:
                 try:
                     with pd.ExcelWriter(excel_path, engine='xlsxwriter') as writer:
                         for table_data in all_tables:
