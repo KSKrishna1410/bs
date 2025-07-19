@@ -11,6 +11,8 @@ services:
       - .:/app
     env_file:
       - docker.env
+    networks:
+      - app_network
     deploy:
       resources:
         limits:
@@ -18,10 +20,6 @@ services:
           memory: 4G
         reservations:
           memory: 2G
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
 
   streamlit:
     build:
@@ -33,6 +31,12 @@ services:
       - .:/app
     env_file:
       - docker.env
+    environment:
+      - API_URL=http://api:8000
+    networks:
+      - app_network
+    depends_on:
+      - api
     deploy:
       resources:
         limits:
@@ -40,7 +44,7 @@ services:
           memory: 2G
         reservations:
           memory: 1G
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536 
+
+networks:
+  app_network:
+    driver: bridge 

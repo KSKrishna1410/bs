@@ -1,10 +1,13 @@
 FROM python:3.10
 
 # Set environment variables for better memory management
+# Set OMP_NUM_THREADS=1 for optimal PaddlePaddle performance
 ENV MALLOC_ARENA_MAX=2
-ENV OMP_NUM_THREADS=2
-ENV NUMEXPR_NUM_THREADS=2
-ENV OPENBLAS_NUM_THREADS=2
+ENV OMP_NUM_THREADS=1
+ENV NUMEXPR_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV VECLIB_MAXIMUM_THREADS=1
 
 # Install native dependencies needed by cv2 and other packages
 RUN apt-get update && \
