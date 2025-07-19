@@ -25,13 +25,21 @@ RUN apt-get update && \
 RUN echo "* soft nofile 65536" >> /etc/security/limits.conf && \
     echo "* hard nofile 65536" >> /etc/security/limits.conf
 
+# Add DNS settings
+RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
+    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+
 WORKDIR /app
 
 # Copy the application code
 COPY . .
 
 # Install PaddlePaddle first to avoid conflicts
-RUN pip install paddlepaddle==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple pip -U && \
+    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --no-cache-dir -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ paddlepaddle==3.1.0 || \
+    (sleep 5 && pip install --no-cache-dir -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ paddlepaddle==3.1.0) || \
+    (sleep 10 && pip install --no-cache-dir -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ paddlepaddle==3.1.0)
 
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.api.txt
