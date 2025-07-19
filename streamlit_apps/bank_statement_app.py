@@ -121,7 +121,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # API Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+API_HOST = os.getenv("API_HOST", "localhost")
+API_PORT = os.getenv("API_PORT", "8000")
+API_BASE_URL = f"http://{API_HOST}:{API_PORT}"
 API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
 
 def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any, Any]]:
@@ -132,6 +134,8 @@ def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any
             'output_dir': '',
             'doctype': 'BANKSTMT'
         }
+        
+        print(f"Connecting to API at: {API_BASE_URL}")
         
         with st.spinner('Processing file through OCR API... This may take several minutes for large or complex files.'):
             response = requests.post(API_ENDPOINT, files=files, data=data, timeout=600)  # 10 minutes

@@ -340,6 +340,11 @@ app.add_middleware(
 # Initialize PDF processor
 pdf_processor = PDFProcessor()
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}
+
 @app.post("/ocr_process/")
 async def process_document(
     file: UploadFile = File(...),
