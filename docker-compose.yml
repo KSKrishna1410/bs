@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   api:
     build:
@@ -5,15 +7,21 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-      - API_DEBUG=True
     volumes:
-      - ./data:/app/data
-      - ./temp:/app/temp
-    networks:
-      - ocr_network
+      - .:/app
+    env_file:
+      - docker.env
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          memory: 2G
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   streamlit:
     build:
@@ -21,23 +29,18 @@ services:
       dockerfile: Dockerfile.streamlit
     ports:
       - "8501:8501"
-    environment:
-      - API_HOST=api
-      - API_PORT=8000
-      - STREAMLIT_HOST=0.0.0.0
-      - STREAMLIT_PORT=8501
-      - ADMIN_PASSWORD=admin123
-      - USER_PASSWORD=user123
-      - DEMO_PASSWORD=demo123
     volumes:
-      - ./data:/app/data
-      - ./temp:/app/temp
-    depends_on:
-      api:
-        condition: service_healthy
-    networks:
-      - ocr_network
-
-networks:
-  ocr_network:
-    driver: bridge 
+      - .:/app
+    env_file:
+      - docker.env
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          memory: 1G
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536 

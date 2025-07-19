@@ -27,14 +27,17 @@ global_ocr = None
 def init_worker():
     """Initialize PaddleOCR instance for each worker process"""
     global global_ocr
-    global_ocr = PaddleOCR(
-        text_detection_model_name="PP-OCRv5_mobile_det",
-        text_recognition_model_name="PP-OCRv5_mobile_rec",
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False,
-        device="cpu"
-    )
+    if global_ocr is None:
+        global_ocr = PaddleOCR(
+            text_detection_model_name="PP-OCRv5_mobile_det",
+            text_recognition_model_name="PP-OCRv5_mobile_rec",
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            device="cpu",
+            enable_mkldnn=True,  # Enable MKL-DNN optimization
+            cpu_threads=2  # Limit CPU threads per process
+        )
 
 def process_page(page_data):
     """Process a single page in parallel"""
@@ -304,10 +307,9 @@ class DocumentOCR:
                 if not temp_image_paths:
                     raise ValueError(f"Could not convert PDF pages to images: {input_path}")
                 
-                # Use first page for getting dimensions (assuming all pages have similar dimensions)
+                # Use first page for getting dimensions
                 primary_image_path = temp_image_paths[0]
             else:
-                # It's an image file
                 primary_image_path = input_path
                 temp_image_paths = [input_path]
             
@@ -326,19 +328,36 @@ class DocumentOCR:
             # Prepare data for parallel processing
             page_data = [(path, idx) for idx, path in enumerate(temp_image_paths)]
             
-            # Determine optimal number of processes
-            num_processes = min(mp.cpu_count(), len(page_data))
-            print(f"🚀 Processing {len(page_data)} pages using {num_processes} processes")
-
-            # Process pages in parallel
-            ocr_data = []
-            with ProcessPoolExecutor(max_workers=num_processes, initializer=init_worker) as executor:
-                results = list(executor.map(process_page, page_data))
-                
-                # Sort results by page number and extract OCR data
-                results.sort(key=lambda x: x[0])  # Sort by page number
-                ocr_data = [self.convert_ndarray(dict(res[1][0])) if res[1] else {} for res in results]
+            # Use a more conservative number of processes based on available memory
+            total_memory_gb = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024.**3)
+            max_processes = min(
+                mp.cpu_count(),
+                max(1, int(total_memory_gb / 4)),  # Assume each process needs ~4GB
+                len(page_data)
+            )
             
+            print(f"🚀 Processing {len(page_data)} pages using {max_processes} processes")
+            
+            # Process pages in smaller batches
+            batch_size = 2  # Process 2 pages at a time
+            ocr_data = []
+            
+            for i in range(0, len(page_data), batch_size):
+                batch = page_data[i:i + batch_size]
+                print(f"Processing batch {i//batch_size + 1} of {(len(page_data) + batch_size - 1)//batch_size}")
+                
+                with ProcessPoolExecutor(
+                    max_workers=min(max_processes, len(batch)), 
+                    initializer=init_worker
+                ) as executor:
+                    batch_results = list(executor.map(process_page, batch))
+                    # Sort batch results by page number
+                    batch_results.sort(key=lambda x: x[0])
+                    ocr_data.extend([
+                        self.convert_ndarray(dict(res[1][0])) if res[1] else {} 
+                        for res in batch_results
+                    ])
+
             print(f"📝 OCR completed: {len(ocr_data)} pages processed")
 
             # Create reconstructed PDF

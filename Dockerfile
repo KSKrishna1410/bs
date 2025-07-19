@@ -1,5 +1,12 @@
 FROM python:3.10
 
+# Set environment variables for better memory management
+ENV MALLOC_ARENA_MAX=2
+ENV OMP_NUM_THREADS=2
+ENV MKL_NUM_THREADS=2
+ENV NUMEXPR_NUM_THREADS=2
+ENV OPENBLAS_NUM_THREADS=2
+
 # Install native dependencies needed by cv2 and other packages
 RUN apt-get update && \
     apt-get install -y \
@@ -13,6 +20,10 @@ RUN apt-get update && \
     libgtk-3-0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Add ulimit settings for the container
+RUN echo "* soft nofile 65536" >> /etc/security/limits.conf && \
+    echo "* hard nofile 65536" >> /etc/security/limits.conf
 
 WORKDIR /app
 
