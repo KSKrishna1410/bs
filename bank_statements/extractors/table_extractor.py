@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
-from ..utils.pdf_to_table import DocumentTableExtractor
+from utils.extraction.table_extractor import DocumentTableExtractor
 
 
 class BankStatementExtractor:

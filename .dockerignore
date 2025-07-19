@@ -45,7 +45,7 @@ ehthumbs.db
 Thumbs.db
 
 # Output directories (will be mounted as volumes)
-comprehensive_output/
+temp/
 bank_statement_output/
 bs_reconstructed_pdfs/
 ocr_outputs_reconstructed/

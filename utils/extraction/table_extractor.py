@@ -1,5 +1,5 @@
 """
-PDF to table extraction utilities
+Generic table extraction utilities for documents
 """
 
 import os
@@ -16,7 +16,7 @@ import warnings
 from img2table.document import PDF
 from pathlib import Path
 
-from .nekkanti_ocr import NekkantiOCR
+from ..ocr.document_ocr import DocumentOCR
 
 warnings.filterwarnings("ignore")
 
@@ -30,29 +30,34 @@ class DocumentTableExtractor:
     
     The class automatically detects the document type and uses the appropriate extraction method.
     """
-    def __init__(self, output_dir="comprehensive_output", save_reconstructed_pdfs=True):
+    def __init__(self, output_dir="temp", save_reconstructed_pdfs=True):
         """Initialize the table extractor"""
+        # Main directories
         self.output_dir = output_dir
-        self.tables_dir = os.path.join(output_dir, "tables")
-        self.extracted_tables_dir = os.path.join(output_dir, "extracted_tables")
-        self.temp_ocr_dir = os.path.join(self.tables_dir, "temp_ocr_processing")
+        
+        # Temp directory structure
+        self.temp_dir = output_dir  # Using output_dir directly as temp
+        self.temp_ocr_dir = os.path.join(self.temp_dir, "ocr")
+        self.temp_tables_dir = os.path.join(self.temp_dir, "tables")
+        self.extracted_tables_dir = os.path.join(self.temp_dir, "extracted_tables")
         
         # Create all required directories
-        os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.tables_dir, exist_ok=True)
-        os.makedirs(self.extracted_tables_dir, exist_ok=True)
-        os.makedirs(self.temp_ocr_dir, exist_ok=True)
+        for dir_path in [
+            self.temp_dir,
+            self.temp_ocr_dir,
+            self.temp_tables_dir,
+            self.extracted_tables_dir
+        ]:
+            os.makedirs(dir_path, exist_ok=True)
         
         # Option to save reconstructed PDFs
         self.save_reconstructed_pdfs = save_reconstructed_pdfs
-        
-        # Directory for reconstructed PDFs
-        self.reconstructed_pdf_dir = os.path.join(output_dir, "reconstructed_pdfs")
-        if self.save_reconstructed_pdfs:
+        if save_reconstructed_pdfs:
+            self.reconstructed_pdf_dir = os.path.join(self.temp_dir, "reconstructed_pdfs")
             os.makedirs(self.reconstructed_pdf_dir, exist_ok=True)
         
         # Initialize the NekkantiOCR class with our temp directory
-        self.ocr_processor = NekkantiOCR(output_dir=self.output_dir)
+        self.ocr_processor = DocumentOCR(output_dir=output_dir)
 
     def _clean_dataframe_text(self, df):
         """
@@ -833,6 +838,28 @@ class DocumentTableExtractor:
             if cleanup_temp and 'result' in locals():
                 self.cleanup_all_temp_files()
 
+    def cleanup_temp_files(self):
+        """Clean up temporary files and directories"""
+        try:
+            # Clean up temp directories
+            for dir_path in [self.temp_ocr_dir, self.temp_tables_dir]:
+                if os.path.exists(dir_path):
+                    for file_name in os.listdir(dir_path):
+                        file_path = os.path.join(dir_path, file_name)
+                        try:
+                            if os.path.isfile(file_path):
+                                os.unlink(file_path)
+                            print(f"🧹 Removed temp file: {file_path}")
+                        except Exception as e:
+                            print(f"⚠️ Could not remove file {file_path}: {e}")
+            
+            # Also clean up OCR processor temp files
+            if hasattr(self.ocr_processor, 'cleanup_temp_files'):
+                self.ocr_processor.cleanup_temp_files()
+            
+        except Exception as e:
+            print(f"⚠️ Error during cleanup: {e}")
+
     def cleanup_temp_directory(self):
         """Clean up the temporary OCR directory."""
         try:
@@ -845,7 +872,7 @@ class DocumentTableExtractor:
             
     def cleanup_all_temp_files(self):
         """Clean up all temporary files and directories."""
-        self.cleanup_temp_directory()
+        self.cleanup_temp_files()
         
         # Also clean up any temp files that might be in the main output directory
         try:
@@ -856,6 +883,23 @@ class DocumentTableExtractor:
                     print(f"🧹 Removed temp file: {temp_file_path}")
         except Exception as e:
             print(f"⚠️ Warning: Could not clean up some temp files: {e}")
+
+    def _save_temp_file(self, data, prefix, suffix):
+        """Save temporary file with given prefix and suffix"""
+        import uuid
+        temp_filename = f"{prefix}_{uuid.uuid4().hex[:8]}{suffix}"
+        save_dir = self.temp_tables_dir
+            
+        temp_path = os.path.join(save_dir, temp_filename)
+        
+        if isinstance(data, (str, bytes)):
+            mode = 'wb' if isinstance(data, bytes) else 'w'
+            with open(temp_path, mode) as f:
+                f.write(data)
+        else:  # Assume it's a PIL Image or similar
+            data.save(temp_path)
+            
+        return temp_path
 
 
 # Example usage

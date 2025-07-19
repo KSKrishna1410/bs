@@ -16,8 +16,9 @@ from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import fitz  # PyMuPDF
+import pandas as pd
 
-from bank_statements.utils.pdf_to_table import DocumentTableExtractor
+from utils.extraction.table_extractor import DocumentTableExtractor
 from bank_statements.extractors.header_extractor import BankStatementHeaderExtractor
 from bank_statements.extractors.table_extractor import BankStatementExtractor
 
@@ -31,7 +32,7 @@ class PDFProcessor:
     3. Providing a clean interface for downstream processing
     """
     
-    def __init__(self, output_dir: str = "comprehensive_output"):
+    def __init__(self, output_dir: str = "temp"):
         """
         Initialize the PDF processor.
         
@@ -49,8 +50,8 @@ class PDFProcessor:
         
         self.header_extractor = BankStatementHeaderExtractor(
             output_dir=os.path.join(output_dir, "headers"),
-            keywords_csv="bankstmt_allkeys.csv",
-            ifsc_master_csv="IFSC_master.csv"
+            keywords_csv="data/master_csv/bankstmt_allkeys.csv",
+            ifsc_master_csv="data/master_csv/IFSC_master.csv"
         )
         
         self.bank_statement_extractor = BankStatementExtractor(
@@ -153,12 +154,13 @@ class PDFProcessor:
             print(f"❌ Error converting image to PDF: {str(e)}")
             return None
     
-    def process_file(self, file_path: str) -> Dict[str, Any]:
+    def process_file(self, file_path: str, session_id: str) -> Dict[str, Any]:
         """
         Process a file (PDF or image) and extract information.
         
         Args:
             file_path (str): Path to the file
+            session_id (str): Unique session ID for this processing request
             
         Returns:
             dict: Extracted information including headers and tables
@@ -196,33 +198,94 @@ class PDFProcessor:
                 analysis = {
                     'is_readable': True,  # After OCR
                     'page_count': 1,      # Single image
-                    'total_chars': 0,     # Not applicable
-                    'total_words': 0,     # Not applicable
-                    'chars_per_page': 0,  # Not applicable
-                    'avg_word_length': 0, # Not applicable
-                    'text_page_ratio': 1  # Not applicable
                 }
             
             # Now extract headers and tables from the readable file
             headers = self.header_extractor.extract_headers(file_path)
-            tables = self.bank_statement_extractor.extract_bank_statement_table(file_path)
+            table_df = self.bank_statement_extractor.extract_bank_statement_table(file_path)
             
-            # Convert tables to list format for JSON
-            table_data = []
-            if tables is not None:
-                table_data = tables.to_dict('records')
+            # Convert DataFrame to list of lists if not empty
+            tables = []
+            if table_df is not None and not table_df.empty:
+                # Get column names as first row
+                tables = [table_df.columns.tolist()]
+                # Convert each row to list and append
+                tables.extend(table_df.values.tolist())
+                
+                # Replace NaN/None with empty string
+                tables = [['' if pd.isna(cell) else str(cell) for cell in row] for row in tables]
             
-            # Create response
+            # Convert headers to list format with bbox info
+            header_list = []
+            for key, value in headers.items():
+                # Extract values from the header data
+                if isinstance(value, dict):
+                    header_value = value.get('value', '')
+                    method = value.get('method', '')
+                    confidence = value.get('confidence', 0)
+                    validation_score = value.get('validation_score', 0)
+                    doc_text = value.get('key_text', '')
+                else:
+                    header_value = value
+                    method = ''
+                    confidence = 0
+                    validation_score = 0
+                    doc_text = ''
+                
+                header_item = {
+                    "key": key,
+                    "value": header_value,  # Use the extracted value
+                    "key_bbox": [[0, 0], [100, 0], [100, 20], [0, 20]],  # Default bbox
+                    "value_bbox": [[0, 0], [100, 0], [100, 20], [0, 20]], # Default bbox
+                    "method": method,
+                    "doc_text": doc_text,
+                    "confidence": confidence,
+                    "validation_score": validation_score
+                }
+                header_list.append(header_item)
+            
+            # Create page-wise data
+            page_wise_data = []
+            for page_num in range(analysis['page_count']):
+                page_data = {
+                    "page": page_num + 1,
+                    "identified_doc_type": "BANKSTMT",
+                    "rawtext": "",  # Raw text will be added by OCR
+                    "headerInfo": header_list if page_num == 0 else [],
+                    "paymentSts": "UNPAID",
+                    "incl_Tax": False,
+                    "lineInfo": {
+                        "lineData": tables if page_num == 0 else [],
+                        "tableInfo": [
+                            {
+                                "key": col,
+                                "position": idx + 1,
+                                "coordinates": [idx * 200, (idx + 1) * 200]
+                            } for idx, col in enumerate(tables[0] if tables else [])
+                        ],
+                        "excludeLine": [],
+                        "tablePosition": [[0, 1380], [0, None]]
+                    } if tables and page_num == 0 else {},
+                    "pageWiseFilePath": f"temp/{session_id}/page{page_num + 1}",
+                    "pageWisedocPath": f"temp/{session_id}/page{page_num + 1}/{os.path.basename(file_path)}-{page_num + 1}.pdf"
+                }
+                page_wise_data.append(page_data)
+            
+            # Create response in exact format
             response = {
-                'status': 'success',
-                'data': {
-                    'document_type': 'BANKSTMT',
-                    'page_cnt': analysis['page_count'],
-                    'pageWiseData': [{
-                        'headerInfo': headers,
-                        'page_no': 1
-                    }],
-                    'lineTabulaData': table_data
+                "status_code": 200,
+                "status": "Success",
+                "data": {
+                    "processId": session_id,
+                    "filePath": f"/files/inHouseOCR/{session_id}/{os.path.basename(file_path)}",
+                    "fileDir": f"/files/inHouseOCR/{session_id}",
+                    "document_type": "BANKSTMT",
+                    "page_cnt": analysis['page_count'],
+                    "isSingleDoc": True,
+                    "obj_Type": "SINGLE_DOC_OBJ",
+                    "fileType": "System-generated",
+                    "pageWiseData": page_wise_data,
+                    "lineTabulaData": tables
                 }
             }
             
@@ -235,6 +298,28 @@ class PDFProcessor:
         finally:
             # Cleanup any temporary files
             self.table_extractor.cleanup_all_temp_files()
+
+def _sanitize_value(value):
+    """Sanitize values for JSON serialization."""
+    if isinstance(value, float):
+        if value.is_integer():
+            # Convert float to int if it's a whole number
+            return str(int(value))
+        return str(value)
+    elif isinstance(value, (int, bool)):
+        return str(value)
+    elif value is None:
+        return ""
+    return str(value)
+
+def _sanitize_data(data):
+    """Recursively sanitize all values in a data structure."""
+    if isinstance(data, dict):
+        return {k: _sanitize_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_sanitize_data(item) for item in data]
+    else:
+        return _sanitize_value(data)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -278,7 +363,7 @@ async def process_document(
         if output_dir:
             output_path = os.path.join(output_dir, session_id)
         else:
-            output_path = os.path.join("comprehensive_output", session_id)
+            output_path = os.path.join("temp", session_id)
         os.makedirs(output_path, exist_ok=True)
         
         # Save uploaded file
@@ -307,7 +392,7 @@ async def process_document(
                 print(f"📄 Processing image file: {file_ext}")
             
             # Process the document
-            result = pdf_processor.process_file(temp_path)
+            result = pdf_processor.process_file(temp_path, session_id)
             
             # Save response to file
             response_file = os.path.join(output_path, f"{file.filename}_response.json")

@@ -9,10 +9,12 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 TEMP_DIR = BASE_DIR / "temp"
+MASTER_CSV_DIR = BASE_DIR / "master_csv"
 
 # Create directories if they don't exist
 DATA_DIR.mkdir(exist_ok=True)
 TEMP_DIR.mkdir(exist_ok=True)
+MASTER_CSV_DIR.mkdir(exist_ok=True)
 
 # OCR settings
 OCR_OUTPUT_DIR = DATA_DIR / "ocr_outputs"
@@ -22,8 +24,8 @@ OCR_OUTPUT_DIR.mkdir(exist_ok=True)
 VALID_BANK_STATEMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.tiff', '.tif']
 
 # Bank statement specific settings
-BANK_KEYWORDS_FILE = BASE_DIR / "bankstmt_allkeys.csv"
-IFSC_MASTER_FILE = BASE_DIR / "IFSC_master.csv"
+BANK_KEYWORDS_FILE = MASTER_CSV_DIR / "bankstmt_allkeys.csv"
+IFSC_MASTER_FILE = MASTER_CSV_DIR / "IFSC_master.csv"
 
 # API settings
 API_HOST = os.getenv("API_HOST", "0.0.0.0")

@@ -7,10 +7,6 @@ process them through the OCR API, and display results in both raw and
 structured formats.
 """
 
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import streamlit as st
 import requests
 import json
@@ -20,15 +16,16 @@ import io
 import time
 import base64
 from datetime import datetime
+import os
 import tempfile
 from PIL import Image
 
-# Now we can import from bank_statements directory
-from bank_statements.config.settings import AUTH_CREDENTIALS, API_HOST, API_PORT
-
-# Update API endpoint
-API_BASE_URL = f"http://{API_HOST}:{API_PORT}"
-API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
+# Authentication configuration
+AUTH_CREDENTIALS = {
+    "admin": os.getenv("ADMIN_PASSWORD", "admin123"),
+    "user": os.getenv("USER_PASSWORD", "user123"),
+    "demo": os.getenv("DEMO_PASSWORD", "demo123")
+}
 
 def check_authentication():
     """Check if user is authenticated"""
@@ -123,6 +120,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# API Configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+API_ENDPOINT = f"{API_BASE_URL}/ocr_process/"
+
 def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any, Any]]:
     """Process file through the API"""
     try:
@@ -156,7 +157,7 @@ def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any
         st.error(f"Error processing file: {str(e)}")
         return None
 
-def display_headers(headers_data: dict) -> None:
+def display_headers(headers_data):
     """Display headers in a structured format"""
     st.subheader("📋 Extracted Headers")
     
@@ -170,22 +171,51 @@ def display_headers(headers_data: dict) -> None:
     statement_info = []
     balance_info = []
     
-    for field_name, field_data in headers_data.items():
-        if not field_data.get('value'):  # Skip empty values
+    for header in headers_data:
+        if not isinstance(header, dict) or 'key' not in header or 'value' not in header:
+            continue
+            
+        field_name = header['key']
+        
+        # Handle string representation of dictionary
+        try:
+            if isinstance(header['value'], str) and header['value'].startswith('{') and header['value'].endswith('}'):
+                # Convert string representation to dict using ast.literal_eval
+                import ast
+                value_dict = ast.literal_eval(header['value'])
+                value = value_dict.get('value', '')
+                method = value_dict.get('method', '')
+                confidence = value_dict.get('confidence', 0)
+                validation_score = value_dict.get('validation_score', 0)
+            else:
+                value = header['value']
+                method = header.get('method', '')
+                confidence = header.get('confidence', 0)
+                validation_score = header.get('validation_score', 0)
+        except:
+            # Fallback if parsing fails
+            value = header['value']
+            method = header.get('method', '')
+            confidence = header.get('confidence', 0)
+            validation_score = header.get('validation_score', 0)
+            
+        if not value:  # Skip empty values
             continue
             
         header_data = {
             'Field': field_name,
-            'Value': field_data.get('value', ''),
-            'Method': field_data.get('method', ''),
-            'Confidence': f"{field_data.get('confidence', 0):.2%}" if field_data.get('confidence', 0) > 0 else "N/A"
+            'Value': value,
+            'Method': method,
+            'Confidence': f"{confidence:.2%}" if confidence > 0 else "N/A",
+            'Validation': f"{validation_score:.2%}" if validation_score > 0 else "N/A"
         }
         
+        # Categorize headers
         if field_name in ['Account Number', 'IFSC Code']:
             account_info.append(header_data)
         elif field_name.startswith('Bank'):
             bank_info.append(header_data)
-        elif 'Statement Date' in field_name or 'Date' in field_name:
+        elif 'Date' in field_name:
             statement_info.append(header_data)
         elif 'Balance' in field_name:
             balance_info.append(header_data)
@@ -196,20 +226,68 @@ def display_headers(headers_data: dict) -> None:
     with col1:
         if account_info:
             st.markdown("**🏦 Account Information**")
-            st.dataframe(pd.DataFrame(account_info), use_container_width=True)
+            df = pd.DataFrame(account_info)
+            st.dataframe(
+                df,
+                column_config={
+                    "Field": st.column_config.TextColumn("Field", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="medium"),
+                    "Method": st.column_config.TextColumn("Method", width="small"),
+                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                    "Validation": st.column_config.TextColumn("Validation", width="small")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
         
         if statement_info:
             st.markdown("**📅 Statement Information**")
-            st.dataframe(pd.DataFrame(statement_info), use_container_width=True)
+            df = pd.DataFrame(statement_info)
+            st.dataframe(
+                df,
+                column_config={
+                    "Field": st.column_config.TextColumn("Field", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="medium"),
+                    "Method": st.column_config.TextColumn("Method", width="small"),
+                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                    "Validation": st.column_config.TextColumn("Validation", width="small")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
     
     with col2:
         if bank_info:
             st.markdown("**🏢 Bank Information**")
-            st.dataframe(pd.DataFrame(bank_info), use_container_width=True)
+            df = pd.DataFrame(bank_info)
+            st.dataframe(
+                df,
+                column_config={
+                    "Field": st.column_config.TextColumn("Field", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="medium"),
+                    "Method": st.column_config.TextColumn("Method", width="small"),
+                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                    "Validation": st.column_config.TextColumn("Validation", width="small")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
         
         if balance_info:
             st.markdown("**💰 Balance Information**")
-            st.dataframe(pd.DataFrame(balance_info), use_container_width=True)
+            df = pd.DataFrame(balance_info)
+            st.dataframe(
+                df,
+                column_config={
+                    "Field": st.column_config.TextColumn("Field", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="medium"),
+                    "Method": st.column_config.TextColumn("Method", width="small"),
+                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                    "Validation": st.column_config.TextColumn("Validation", width="small")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
 
 def display_table_data(table_data: list) -> None:
     """Display table data in a structured format"""

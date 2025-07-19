@@ -16,7 +16,8 @@ import re
 import math
 from typing import List, Dict, Tuple, Optional, Any
 
-from ..utils.pdf_to_table import DocumentTableExtractor
+from utils.extraction.table_extractor import DocumentTableExtractor
+from utils.extraction.key_value_extractor import KeyValueExtractor
 from ..config.settings import BANK_KEYWORDS_FILE, IFSC_MASTER_FILE
 
 
@@ -31,7 +32,7 @@ class BankStatementHeaderExtractor:
     - Confidence scoring for optimal matches
     """
     
-    def __init__(self, output_dir="header_extraction_output", keywords_csv="bankstmt_allkeys.csv", ifsc_master_csv="IFSC_master.csv"):
+    def __init__(self, output_dir="header_extraction_output", keywords_csv="data/master_csv/bankstmt_allkeys.csv", ifsc_master_csv="IFSC_master.csv"):
         """
         Initialize the header extractor.
         
@@ -1544,6 +1545,23 @@ class BankStatementHeaderExtractor:
         
         return cleaned_headers
     
+    def _sanitize_header_value(self, value):
+        """Sanitize header values for JSON serialization."""
+        if isinstance(value, float):
+            if value.is_integer():
+                # Convert float to int if it's a whole number
+                return str(int(value))
+            return str(value)
+        elif isinstance(value, (int, bool)):
+            return str(value)
+        elif value is None:
+            return ""
+        return str(value)
+
+    def _sanitize_headers(self, headers):
+        """Sanitize all header values for JSON serialization."""
+        return {k: self._sanitize_header_value(v) for k, v in headers.items()}
+
     def extract_headers(self, pdf_path: str) -> Dict[str, Any]:
         """
         Extract header information from a bank statement PDF.
@@ -1663,17 +1681,21 @@ class BankStatementHeaderExtractor:
             enhanced_headers = self._enhance_headers_with_ifsc_lookup(standard_headers)
             final_headers = self._post_process_headers(enhanced_headers)
             
-            # Save final results with IFSC-enhanced data
-            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-            output_file = os.path.join(self.output_dir, f"{base_name}_headers.json")
+            # Sanitize headers before returning
+            headers = self._sanitize_headers(final_headers)
+            
+            # Save headers to JSON file
+            output_file = os.path.join(
+                self.output_dir, 
+                f"{os.path.splitext(os.path.basename(pdf_path))[0]}_headers.json"
+            )
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
             
             with open(output_file, 'w') as f:
-                json.dump(final_headers, f, indent=2)
+                json.dump(headers, f, indent=2)
+            print(f"💾 Saved {len(headers)} final headers to: {output_file}")
             
-            print(f"💾 Saved {len(final_headers)} final headers to: {output_file}")
-            print(f"📊 Final header fields: {', '.join(final_headers.keys())}")
-            
-            return final_headers
+            return headers
             
         except Exception as e:
             print(f"❌ Error extracting headers: {str(e)}")

@@ -1,3 +1,7 @@
+"""
+Document OCR and reconstruction utilities
+"""
+
 import os
 import json
 import numpy as np
@@ -6,25 +10,39 @@ import cv2
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from paddleocr import PaddleOCR
-import fitz  # PyMuPDF  
-import pandas as pd  
+import fitz  # PyMuPDF
+import pandas as pd
 import warnings
 from img2table.document import Image as Img2TableImage, PDF as Img2TablePDF
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
 
-class NekkantiOCR:
-    def __init__(self, output_dir="comprehensive_output"):
+class DocumentOCR:
+    """Generic document OCR and reconstruction class"""
+    
+    def __init__(self, output_dir="temp"):
         """Initialize the OCR processor with output directory"""
+        # Main directories
         self.output_dir = output_dir
-        self.tables_dir = os.path.join(output_dir, "tables")
-        self.temp_ocr_dir = os.path.join(self.tables_dir, "temp_ocr_processing")
+        
+        # Temp directory structure
+        self.temp_dir = output_dir  # Using output_dir directly as temp
+        self.temp_ocr_dir = os.path.join(self.temp_dir, "ocr")
+        self.temp_images_dir = os.path.join(self.temp_dir, "images")
+        self.temp_pdfs_dir = os.path.join(self.temp_dir, "pdfs")
+        self.temp_headers_dir = os.path.join(self.temp_dir, "headers")
         
         # Create all required directories
-        os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.tables_dir, exist_ok=True)
-        os.makedirs(self.temp_ocr_dir, exist_ok=True)
+        for dir_path in [
+            self.temp_dir,
+            self.temp_ocr_dir,
+            self.temp_images_dir,
+            self.temp_pdfs_dir,
+            self.temp_headers_dir
+        ]:
+            os.makedirs(dir_path, exist_ok=True)
         
         self.ocr = PaddleOCR(
             text_detection_model_name="PP-OCRv5_mobile_det",
@@ -162,7 +180,7 @@ class NekkantiOCR:
                     pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x scaling for better quality
                     
                     # Create temporary image path
-                    temp_image_path = os.path.join(self.output_dir, f"{base_name}_temp_page{page_num + 1}.png")
+                    temp_image_path = os.path.join(self.temp_images_dir, f"{base_name}_temp_page{page_num + 1}.png")
                     
                     # Save the image
                     pix.save(temp_image_path)
@@ -190,14 +208,57 @@ class NekkantiOCR:
             print(f"❌ Error converting PDF to images: {e}")
             raise
 
-    def _cleanup_temp_files(self, temp_files):
-        """Remove temporary files."""
-        for temp_file in temp_files:
-            try:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except Exception as e:
-                print(f"⚠️  Warning: Could not remove temp file {temp_file}: {e}")
+    def cleanup_temp_files(self):
+        """Clean up all temporary files"""
+        try:
+            # Clean up temp directories
+            for dir_path in [self.temp_ocr_dir, self.temp_images_dir, self.temp_pdfs_dir]:
+                if os.path.exists(dir_path):
+                    for file_name in os.listdir(dir_path):
+                        file_path = os.path.join(dir_path, file_name)
+                        try:
+                            if os.path.isfile(file_path):
+                                os.unlink(file_path)
+                            print(f"🧹 Removed temp file: {file_path}")
+                        except Exception as e:
+                            print(f"⚠️ Could not remove file {file_path}: {e}")
+        except Exception as e:
+            print(f"⚠️ Error during cleanup: {e}")
+
+    def _cleanup_temp_images(self, temp_image_paths):
+        """Clean up temporary image files"""
+        if temp_image_paths:
+            print(f"🧹 Cleaning up {len(temp_image_paths)} temporary image files...")
+            for temp_file in temp_image_paths:
+                try:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                except Exception as e:
+                    print(f"⚠️ Warning: Could not remove temp file {temp_file}: {e}")
+
+    def _save_temp_file(self, data, prefix, suffix):
+        """Save temporary file with given prefix and suffix"""
+        import uuid
+        temp_filename = f"{prefix}_{uuid.uuid4().hex[:8]}{suffix}"
+        if suffix.lower().endswith('.pdf'):
+            save_dir = self.temp_pdfs_dir
+        elif suffix.lower() in ['.jpg', '.jpeg', '.png']:
+            save_dir = self.temp_images_dir
+        elif suffix.lower().endswith('.json'):
+            save_dir = self.temp_headers_dir
+        else:
+            save_dir = self.temp_ocr_dir
+            
+        temp_path = os.path.join(save_dir, temp_filename)
+        
+        if isinstance(data, (str, bytes)):
+            mode = 'wb' if isinstance(data, bytes) else 'w'
+            with open(temp_path, mode) as f:
+                f.write(data)
+        else:  # Assume it's a PIL Image or similar
+            data.save(temp_path)
+            
+        return temp_path
 
     def ocr_and_reconstruct(self, input_path):
         """OCR and reconstruct a document"""
@@ -240,7 +301,7 @@ class NekkantiOCR:
 
             # Create reconstructed PDF
             base_name = os.path.splitext(os.path.basename(input_path))[0]
-            pdf_path = os.path.join(self.temp_ocr_dir, f"{base_name}_reconstructed.pdf")
+            pdf_path = os.path.join(self.temp_pdfs_dir, f"{base_name}_reconstructed.pdf")
             
             # Ensure parent directory exists
             os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
@@ -325,6 +386,9 @@ class NekkantiOCR:
             else:
                 raise RuntimeError("No pages were processed - could not create PDF")
 
+            # Clean up temporary images
+            self._cleanup_temp_images(temp_image_paths)
+
             return ocr_data, pdf_path
             
         except Exception as e:
@@ -332,10 +396,8 @@ class NekkantiOCR:
             raise
             
         finally:
-            # Clean up temporary files
-            if temp_image_paths:
-                print(f"🧹 Cleaning up {len(temp_image_paths)} temporary image files...")
-                self._cleanup_temp_files(temp_image_paths)
+            # Clean up temporary images in case of error
+            self._cleanup_temp_images(temp_image_paths)
 
     def ocr(self, input_path):
         result = self.ocr.predict(input_path)
@@ -902,7 +964,7 @@ if __name__ == "__main__":
     # input_path = "35 Invoices/23.1_medplus-1.png"
     # input_path = "35 Invoices/21.1_itemInvoiceDownload-1 (1)-1.png"
 
-    processor = NekkantiOCR()
+    processor = DocumentOCR()
     
     # Use the complete pipeline: OCR, reconstruct PDF, and extract tables
     ocr_results, pdf_path, extracted_tables = processor.ocr_reconstruct_and_extract_tables(input_path)

@@ -1,8 +1,0 @@
-2025-07-19 09:51:01 [INFO] processor: Cleaned up temp directory: header_extraction_output/temp_ocr/temp_ocr_processing
-2025-07-19 09:51:01 [INFO] processor: Processing document: /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmpcughg639/axis_bank__statement_for_september_2024_Original.pdf
-2025-07-19 09:51:01 [INFO] processor: PDF Analysis: 6542 chars, 528 words, avg_len: 12.4
-2025-07-19 09:51:01 [INFO] processor: Readability metrics: 2180.7 chars/page, 100.0% pages with text
-2025-07-19 09:51:01 [INFO] processor: Readability decision: READABLE
-2025-07-19 09:51:01 [INFO] processor: Extracting tables from /var/folders/p8/qfrq8wr92gx1hml6j01_p1zr0000gn/T/tmpcughg639/axis_bank__statement_for_september_2024_Original.pdf
-2025-07-19 09:51:01 [ERROR] processor: Error processing document: 'NoneType' object is not callable
-2025-07-19 09:51:01 [INFO] processor: Cleaned up temp directory: bs_tables_extracted/temp_ocr_processing
