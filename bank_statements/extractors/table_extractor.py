@@ -71,8 +71,13 @@ class BankStatementExtractor:
         
         cleaned_df = df.copy()
         for col in cleaned_df.columns:
-            if cleaned_df[col].dtype == 'object':  # Only clean string/object columns
-                cleaned_df[col] = cleaned_df[col].apply(lambda x: clean_text(x))
+            try:
+                # Check if column contains string/object data
+                if cleaned_df[col].dtypes == 'object':
+                    cleaned_df[col] = cleaned_df[col].apply(lambda x: clean_text(x))
+            except Exception as e:
+                print(f"⚠️ Warning: Could not clean column {col}: {str(e)}")
+                continue
         
         return cleaned_df
     
