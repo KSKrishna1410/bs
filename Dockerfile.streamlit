@@ -17,7 +17,6 @@ COPY . .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.streamlit.txt
-RUN pip install --no-cache-dir -e bank_statements/
 
 # Expose Streamlit port
 EXPOSE 8501
