@@ -1,14 +1,5 @@
 FROM python:3.10
 
-# Set environment variables for better memory management
-# Set OMP_NUM_THREADS=1 for optimal PaddlePaddle performance
-ENV MALLOC_ARENA_MAX=2
-ENV OMP_NUM_THREADS=1
-ENV NUMEXPR_NUM_THREADS=1
-ENV OPENBLAS_NUM_THREADS=1
-ENV MKL_NUM_THREADS=1
-ENV VECLIB_MAXIMUM_THREADS=1
-
 # Install native dependencies needed by cv2 and other packages
 RUN apt-get update && \
     apt-get install -y \
@@ -23,26 +14,16 @@ RUN apt-get update && \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.api.txt .
+# Copy the application code
+COPY . .
 
 # Install PaddlePaddle first to avoid conflicts
 RUN pip install paddlepaddle==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.api.txt
-
-# Copy the application code
-COPY . .
-
-# Add ulimit settings for the container
-RUN echo "* soft nofile 65536" >> /etc/security/limits.conf && \
-    echo "* hard nofile 65536" >> /etc/security/limits.conf
-
-
 
 # Expose the API port
 EXPOSE 8000
