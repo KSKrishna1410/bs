@@ -157,7 +157,7 @@ def process_file_with_api(file_bytes: bytes, filename: str) -> Optional[Dict[Any
         st.error(f"Error processing file: {str(e)}")
         return None
 
-def display_headers(headers_data: list) -> None:
+def display_headers(headers_data: dict) -> None:
     """Display headers in a structured format"""
     st.subheader("📋 Extracted Headers")
     
@@ -171,29 +171,24 @@ def display_headers(headers_data: list) -> None:
     statement_info = []
     balance_info = []
     
-    for header in headers_data:
-        key = header.get('key', '')
-        value = header.get('value', '')
-        method = header.get('method', '')
-        confidence = header.get('confidence', 0)
-        
-        if not value:
+    for field_name, field_data in headers_data.items():
+        if not field_data.get('value'):  # Skip empty values
             continue
             
         header_data = {
-            'Field': key,
-            'Value': value,
-            'Method': method,
-            'Confidence': f"{confidence:.2%}" if confidence > 0 else "N/A"
+            'Field': field_name,
+            'Value': field_data.get('value', ''),
+            'Method': field_data.get('method', ''),
+            'Confidence': f"{field_data.get('confidence', 0):.2%}" if field_data.get('confidence', 0) > 0 else "N/A"
         }
         
-        if key in ['Account Number', 'IFSC Code']:
+        if field_name in ['Account Number', 'IFSC Code']:
             account_info.append(header_data)
-        elif key.startswith('Bank'):
+        elif field_name.startswith('Bank'):
             bank_info.append(header_data)
-        elif 'Statement Date' in key:
+        elif 'Statement Date' in field_name or 'Date' in field_name:
             statement_info.append(header_data)
-        elif 'Balance' in key:
+        elif 'Balance' in field_name:
             balance_info.append(header_data)
     
     # Display in columns
@@ -526,7 +521,7 @@ def main():
             # Headers
             page_wise_data = data.get('pageWiseData', [])
             if page_wise_data:
-                headers_data = page_wise_data[0].get('headerInfo', [])
+                headers_data = page_wise_data[0].get('headerInfo', {})
                 display_headers(headers_data)
             
             st.markdown("---")
